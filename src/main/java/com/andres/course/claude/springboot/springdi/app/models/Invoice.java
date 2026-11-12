@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class Invoice {
 
-    // Inyección de dependencia mediante atributo (field injection)
+    // Inyección de dependencia por constructor (constructor injection)
     private final Customer customer;
 
     @Value("${invoice.description}")
