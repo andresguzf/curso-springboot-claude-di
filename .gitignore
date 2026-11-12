@@ -1,0 +1,81 @@
+# ============================================================
+# Claude Code: workspace y evaluaciones de skills
+# ============================================================
+.claude/skills/*-workspace/
+.claude/skills/*/evals/
+# Configuración local y personal de Claude Code
+.claude/settings.local.json
+CLAUDE.local.md
+
+# ============================================================
+# Maven / Spring Boot
+# ============================================================
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+HELP.md
+*.log
+logs/
+
+# ============================================================
+# Archivos sensibles: variables de entorno, credenciales y llaves
+# ============================================================
+.env
+.env.*
+!.env.example
+*.env
+application-local.properties
+application-secret*.properties
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+credentials.json
+secrets/
+
+# ============================================================
+# IDEs
+# ============================================================
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+# Eclipse / STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# VS Code
+.vscode/
+
+# ============================================================
+# Sistema operativo
+# ============================================================
+.DS_Store
+Thumbs.db
