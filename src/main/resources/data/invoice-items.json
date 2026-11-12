@@ -1,0 +1,34 @@
+[
+  {
+    "product": { "name": "Café molido 250 g", "price": 4990, "createdAt": "2026-11-01T09:00:00", "updatedAt": "2026-11-01T09:00:00" },
+    "quantity": 2
+  },
+  {
+    "product": { "name": "Fideos spaghetti 400 g", "price": 1090, "createdAt": "2026-11-01T09:05:00", "updatedAt": "2026-11-03T10:15:00" },
+    "quantity": 4
+  },
+  {
+    "product": { "name": "Salsa de tomate 200 g", "price": 790, "createdAt": "2026-11-01T09:10:00", "updatedAt": "2026-11-01T09:10:00" },
+    "quantity": 3
+  },
+  {
+    "product": { "name": "Queso laminado 250 g", "price": 3490, "createdAt": "2026-11-02T08:30:00", "updatedAt": "2026-11-05T12:00:00" },
+    "quantity": 1
+  },
+  {
+    "product": { "name": "Yogur natural 1 kg", "price": 2290, "createdAt": "2026-11-02T08:45:00", "updatedAt": "2026-11-02T08:45:00" },
+    "quantity": 2
+  },
+  {
+    "product": { "name": "Plátanos 1 kg", "price": 1490, "createdAt": "2026-11-03T07:20:00", "updatedAt": "2026-11-06T07:20:00" },
+    "quantity": 2
+  },
+  {
+    "product": { "name": "Detergente líquido 3 L", "price": 8990, "createdAt": "2026-11-03T11:00:00", "updatedAt": "2026-11-03T11:00:00" },
+    "quantity": 1
+  },
+  {
+    "product": { "name": "Papel higiénico 12 rollos", "price": 6490, "createdAt": "2026-11-04T16:40:00", "updatedAt": "2026-11-08T09:30:00" },
+    "quantity": 1
+  }
+]

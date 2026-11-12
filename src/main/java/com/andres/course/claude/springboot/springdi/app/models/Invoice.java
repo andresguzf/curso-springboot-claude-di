@@ -1,6 +1,5 @@
 package com.andres.course.claude.springboot.springdi.app.models;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -17,9 +16,9 @@ public class Invoice {
     @Value("${invoice.description}")
     private String description;
 
-    // Hay dos beans List<InvoiceItem> (itemsOffice e itemsSupermarket):
+    // Hay tres beans List<InvoiceItem> (itemsOffice, itemsSupermarket e itemsJson):
     // @Qualifier indica cuál inyectar
-    Invoice(Customer customer, @Qualifier("itemsOffice") List<InvoiceItem> items) {
+    Invoice(Customer customer, List<InvoiceItem> items) {
         this.customer = customer;
         this.items = items;
     }

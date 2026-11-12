@@ -2,9 +2,17 @@ package com.andres.course.claude.springboot.springdi.app.config;
 
 import com.andres.course.claude.springboot.springdi.app.models.InvoiceItem;
 import com.andres.course.claude.springboot.springdi.app.models.Product;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.Resource;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -45,5 +53,20 @@ public class AppConfig {
                 new InvoiceItem(oil, 1),
                 new InvoiceItem(sugar, 1)
         );
+    }
+
+    // Items leídos desde src/main/resources/data/invoice-items.json.
+    // Spring inyecta en los parámetros del método el JsonMapper (Jackson 3)
+    // que configura Spring Boot y el archivo del classpath.
+    @Bean
+    @Primary
+    public List<InvoiceItem> itemsJson(JsonMapper jsonMapper,
+                                       @Value("classpath:data/invoice-items.json") Resource itemsFile) {
+        try (InputStream inputStream = itemsFile.getInputStream()) {
+            return jsonMapper.readValue(inputStream, new TypeReference<List<InvoiceItem>>() {
+            });
+        } catch (IOException e) {
+            throw new UncheckedIOException("No se pudo leer " + itemsFile.getFilename(), e);
+        }
     }
 }

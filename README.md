@@ -109,7 +109,8 @@ src/
 │   │       ├── ResourceNotFoundException.java
 │   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
 │   └── resources/
-│       └── application.properties            # Swagger UI, Actuator, ProblemDetail y datos de ejemplo
+│       ├── application.properties            # Swagger UI, Actuator, ProblemDetail y datos de ejemplo
+│       └── data/invoice-items.json           # 8 items de la factura en formato JSON
 └── test/java/com/andres/course/claude/springboot/springdi/app/
     └── ApplicationTests.java                 # verifica que el contexto arranca
 ```
@@ -131,15 +132,16 @@ El ejemplo muestra cómo Spring crea los beans y los inyecta unos en otros:
 ```
 Customer (@Component) ─────────────────────┐
                                            ├──▶ Invoice ──▶ InvoiceServiceImpl ──▶ InvoiceController ──▶ GET /api/invoices
-itemsOffice (@Bean, @Qualifier) ───────────┘   (@Component)  (@Service)             (@RestController)
-itemsSupermarket (@Bean, no se usa por ahora)
+itemsJson (@Bean, @Qualifier) ─────────────┘   (@Component)  (@Service)             (@RestController)
+   ▲ lee data/invoice-items.json
+itemsOffice, itemsSupermarket (@Bean, no se usan por ahora)
 ```
 
 | Clase | Rol | Recibe por constructor |
 |---|---|---|
 | `Customer` | componente con `name` y `lastname` | — (valores con `@Value`) |
 | `Invoice` | componente con `description` y `getTotal()` | `Customer` y `List<InvoiceItem>` (con `@Qualifier`) |
-| `AppConfig` | `@Configuration` con dos métodos `@Bean`: `itemsOffice` e `itemsSupermarket` | — |
+| `AppConfig` | `@Configuration` con tres métodos `@Bean`: `itemsOffice`, `itemsSupermarket` e `itemsJson` | — |
 | `InvoiceItem` | item de la factura: `product`, `quantity` y `getTotal()` (POJO, no es bean) | — |
 | `Product` | `name`, `price` (`BigDecimal`), `createdAt` y `updatedAt` (POJO, no es bean) | — |
 | `InvoiceService` / `InvoiceServiceImpl` | lógica de negocio, desacoplada del controller | `Invoice` |
@@ -158,19 +160,59 @@ Por eso las listas se arman en `AppConfig` con métodos `@Bean`:
 |---|---|
 | `itemsOffice` | 3 componentes de PC: notebook, mouse inalámbrico y monitor |
 | `itemsSupermarket` | 7 productos de supermercado: leche, pan, arroz, huevos, manzanas, aceite y azúcar |
+| `itemsJson` | 8 productos de supermercado leídos de `data/invoice-items.json` |
 
-Como hay dos beans del mismo tipo `List<InvoiceItem>`, Spring no sabe cuál
+Como hay tres beans del mismo tipo `List<InvoiceItem>`, Spring no sabe cuál
 inyectar y fallaría al arrancar. `Invoice` lo resuelve con `@Qualifier`:
 
 ```java
-Invoice(Customer customer, @Qualifier("itemsOffice") List<InvoiceItem> items) {
+Invoice(Customer customer, @Qualifier("itemsJson") List<InvoiceItem> items) {
     this.customer = customer;
     this.items = items;
 }
 ```
 
-Para que la factura use los productos de supermercado, cambia el qualifier a
-`"itemsSupermarket"`.
+Para usar otra lista, cambia el qualifier a `"itemsOffice"` o `"itemsSupermarket"`.
+
+### Items desde un archivo JSON
+
+Los 8 items de `itemsJson` están en `src/main/resources/data/invoice-items.json`.
+Cada item trae el producto completo y la cantidad:
+
+```json
+[
+  {
+    "product": { "name": "Café molido 250 g", "price": 4990, "createdAt": "2026-11-01T09:00:00", "updatedAt": "2026-11-01T09:00:00" },
+    "quantity": 2
+  },
+  ...
+]
+```
+
+El método `@Bean` recibe por parámetro el `JsonMapper` de Jackson 3 que ya
+configura Spring Boot y el archivo del classpath, y lo convierte en una
+`List<InvoiceItem>`:
+
+```java
+@Bean
+public List<InvoiceItem> itemsJson(JsonMapper jsonMapper,
+                                   @Value("classpath:data/invoice-items.json") Resource itemsFile) {
+    try (InputStream inputStream = itemsFile.getInputStream()) {
+        return jsonMapper.readValue(inputStream, new TypeReference<List<InvoiceItem>>() {
+        });
+    } catch (IOException e) {
+        throw new UncheckedIOException("No se pudo leer " + itemsFile.getFilename(), e);
+    }
+}
+```
+
+- `TypeReference` le indica a Jackson el tipo genérico completo (`List<InvoiceItem>`).
+- Las fechas en formato ISO (`2026-11-01T09:00:00`) se convierten a `LocalDateTime`.
+- Si el archivo no existe o tiene un error, la aplicación no arranca y el
+  mensaje indica qué archivo falló.
+
+Para cambiar los productos de la factura basta editar el JSON y reiniciar la
+aplicación; no hay que tocar código.
 
 ### Total de la factura
 
@@ -217,18 +259,18 @@ Respuesta de `GET /api/invoices`:
   "items": [
     {
       "product": {
-        "name": "Notebook",
-        "price": 899990,
-        "createdAt": "2026-11-12T17:30:00.000000",
-        "updatedAt": "2026-11-12T17:30:00.000000"
+        "name": "Café molido 250 g",
+        "price": 4990,
+        "createdAt": "2026-11-01T09:00:00",
+        "updatedAt": "2026-11-01T09:00:00"
       },
-      "quantity": 1,
-      "total": 899990
+      "quantity": 2,
+      "total": 9980
     },
-    { "product": { "name": "Mouse inalámbrico", "price": 19990, "...": "..." }, "quantity": 2, "total": 39980 },
-    { "product": { "name": "Monitor 27\"", "price": 249990, "...": "..." }, "quantity": 2, "total": 499980 }
+    { "product": { "name": "Fideos spaghetti 400 g", "price": 1090, "...": "..." }, "quantity": 4, "total": 4360 },
+    "... (8 items en total)"
   ],
-  "total": 1439950
+  "total": 43240
 }
 ```
 
