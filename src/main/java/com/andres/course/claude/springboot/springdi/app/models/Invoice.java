@@ -18,9 +18,9 @@ public class Invoice {
     @Value("${invoice.description}")
     private String description;
 
-    // Hay tres beans List<InvoiceItem> (itemsOffice, itemsSupermarket e itemsJson):
+    // Hay cuatro beans List<InvoiceItem> (itemsOffice, itemsSupermarket, itemsJson e itemsCsv):
     // el calificador personalizado @InvoiceItemsSource indica cuál inyectar
-    Invoice(Customer customer, @InvoiceItemsSource(Source.OFFICE) List<InvoiceItem> items) {
+    Invoice(Customer customer, @InvoiceItemsSource(Source.CSV) List<InvoiceItem> items) {
         this.customer = customer;
         this.items = items;
     }

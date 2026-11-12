@@ -91,7 +91,7 @@ src/
 │   ├── java/com/andres/course/claude/springboot/springdi/app/
 │   │   ├── Application.java                  # clase principal (@SpringBootApplication)
 │   │   ├── config/
-│   │   │   ├── AppConfig.java                # @Bean con las listas de items (PC, supermercado y JSON)
+│   │   │   ├── AppConfig.java                # @Bean con las listas de items (PC, supermercado, JSON y CSV)
 │   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
@@ -111,7 +111,9 @@ src/
 │   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
 │   └── resources/
 │       ├── application.properties            # Swagger UI, Actuator, ProblemDetail y datos de ejemplo
-│       └── data/invoice-items.json           # 8 items de la factura en formato JSON
+│       └── data/
+│           ├── invoice-items.json            # 8 items de la factura en formato JSON
+│           └── invoice-items.csv             # 10 items de la factura en formato CSV
 └── test/java/com/andres/course/claude/springboot/springdi/app/
     └── ApplicationTests.java                 # verifica que el contexto arranca
 ```
@@ -133,16 +135,16 @@ El ejemplo muestra cómo Spring crea los beans y los inyecta unos en otros:
 ```
 Customer (@Component) ─────────────────────┐
                                            ├──▶ Invoice ──▶ InvoiceServiceImpl ──▶ InvoiceController ──▶ GET /api/invoices
-itemsJson (@Bean, @InvoiceItemsSource) ────┘   (@Component)  (@Service)             (@RestController)
-   ▲ lee data/invoice-items.json
-itemsOffice, itemsSupermarket (@Bean, no se usan por ahora)
+itemsCsv (@Bean, @InvoiceItemsSource) ─────┘   (@Component)  (@Service)             (@RestController)
+   ▲ lee data/invoice-items.csv
+itemsOffice, itemsSupermarket, itemsJson (@Bean, no se usan por ahora)
 ```
 
 | Clase | Rol | Recibe por constructor |
 |---|---|---|
 | `Customer` | componente con `name` y `lastname` | — (valores con `@Value`) |
 | `Invoice` | componente con `description` y `getTotal()` | `Customer` y `List<InvoiceItem>` (con `@InvoiceItemsSource`) |
-| `AppConfig` | `@Configuration` con tres métodos `@Bean`: `itemsOffice`, `itemsSupermarket` e `itemsJson` | — |
+| `AppConfig` | `@Configuration` con cuatro métodos `@Bean`: `itemsOffice`, `itemsSupermarket`, `itemsJson` e `itemsCsv` | — |
 | `InvoiceItem` | item de la factura: `product`, `quantity` y `getTotal()` (POJO, no es bean) | — |
 | `Product` | `name`, `price` (`BigDecimal`), `createdAt` y `updatedAt` (POJO, no es bean) | — |
 | `InvoiceService` / `InvoiceServiceImpl` | lógica de negocio, desacoplada del controller | `Invoice` |
@@ -162,8 +164,9 @@ Por eso las listas se arman en `AppConfig` con métodos `@Bean`:
 | `itemsOffice` | 3 componentes de PC: notebook, mouse inalámbrico y monitor |
 | `itemsSupermarket` | 7 productos de supermercado: leche, pan, arroz, huevos, manzanas, aceite y azúcar |
 | `itemsJson` | 8 productos de supermercado leídos de `data/invoice-items.json` |
+| `itemsCsv` | 10 productos de supermercado leídos de `data/invoice-items.csv` |
 
-Como hay tres beans del mismo tipo `List<InvoiceItem>`, Spring no sabe cuál
+Como hay cuatro beans del mismo tipo `List<InvoiceItem>`, Spring no sabe cuál
 inyectar y fallaría al arrancar. Para elegir se usa un **calificador
 personalizado**.
 
@@ -182,7 +185,7 @@ public @interface InvoiceItemsSource {
 
     Source value();
 
-    enum Source { OFFICE, SUPERMARKET, JSON }
+    enum Source { OFFICE, SUPERMARKET, JSON, CSV }
 }
 ```
 
@@ -203,23 +206,27 @@ public List<InvoiceItem> itemsOffice() { ... }
 public List<InvoiceItem> itemsSupermarket() { ... }
 
 @Bean
-@Primary
 @InvoiceItemsSource(Source.JSON)
 public List<InvoiceItem> itemsJson(...) { ... }
+
+@Bean
+@InvoiceItemsSource(Source.CSV)
+public List<InvoiceItem> itemsCsv(...) { ... }
 ```
 
 Y `Invoice` pide la lista que necesita en su constructor:
 
 ```java
-Invoice(Customer customer, @InvoiceItemsSource(Source.JSON) List<InvoiceItem> items) {
+Invoice(Customer customer, @InvoiceItemsSource(Source.CSV) List<InvoiceItem> items) {
     this.customer = customer;
     this.items = items;
 }
 ```
 
-Para usar otra lista, cambia el valor a `Source.OFFICE` o `Source.SUPERMARKET`.
-`itemsJson` además es `@Primary`, así que es la que se inyecta cuando se pide
-una `List<InvoiceItem>` sin ningún calificador.
+Para usar otra lista, cambia el valor a `Source.OFFICE`, `Source.SUPERMARKET` o
+`Source.JSON`. Ninguna lista es `@Primary`, así que pedir una
+`List<InvoiceItem>` sin calificador falla al arrancar
+(`NoUniqueBeanDefinitionException`): siempre hay que indicar el origen.
 
 ### Items desde un archivo JSON
 
@@ -258,8 +265,53 @@ public List<InvoiceItem> itemsJson(JsonMapper jsonMapper,
 - Si el archivo no existe o tiene un error, la aplicación no arranca y el
   mensaje indica qué archivo falló.
 
-Para cambiar los productos de la factura basta editar el JSON y reiniciar la
-aplicación; no hay que tocar código.
+Para cambiar los productos basta editar el JSON y reiniciar la aplicación; no
+hay que tocar código.
+
+### Items desde un archivo CSV
+
+Los 10 items de `itemsCsv` están en `src/main/resources/data/invoice-items.csv`.
+La primera línea es el encabezado y cada línea siguiente es un item:
+
+```csv
+name,price,quantity,createdAt,updatedAt
+Lentejas 1 kg,2290,2,2026-11-02T10:00:00,2026-11-02T10:00:00
+Atún en lata 160 g,1890,4,2026-11-02T10:05:00,2026-11-04T08:30:00
+...
+```
+
+El método `@Bean` lee el archivo línea por línea, sin librerías externas:
+
+```java
+@Bean
+@InvoiceItemsSource(Source.CSV)
+public List<InvoiceItem> itemsCsv(@Value("classpath:data/invoice-items.csv") Resource itemsFile) {
+    try (BufferedReader reader = new BufferedReader(
+            new InputStreamReader(itemsFile.getInputStream(), StandardCharsets.UTF_8))) {
+        return reader.lines()
+                .skip(1)                          // salta el encabezado
+                .filter(line -> !line.isBlank())  // ignora líneas vacías
+                .map(this::toInvoiceItem)
+                .toList();
+    } catch (IOException e) {
+        throw new UncheckedIOException("No se pudo leer " + itemsFile.getFilename(), e);
+    }
+}
+
+// Convierte una línea del CSV en un InvoiceItem
+private InvoiceItem toInvoiceItem(String line) {
+    String[] columns = line.split(",");
+    Product product = new Product(columns[0].trim(), new BigDecimal(columns[1].trim()));
+    product.setCreatedAt(LocalDateTime.parse(columns[3].trim()));
+    product.setUpdatedAt(LocalDateTime.parse(columns[4].trim()));
+    return new InvoiceItem(product, Integer.parseInt(columns[2].trim()));
+}
+```
+
+- Se lee en UTF-8 para respetar acentos como "Atún" o "Té".
+- Cada línea se separa con `split(",")`, así que los nombres de producto no
+  pueden contener comas. Si hiciera falta, se puede usar una librería como
+  OpenCSV o Jackson CSV.
 
 ### Total de la factura
 
@@ -306,18 +358,18 @@ Respuesta de `GET /api/invoices`:
   "items": [
     {
       "product": {
-        "name": "Café molido 250 g",
-        "price": 4990,
-        "createdAt": "2026-11-01T09:00:00",
-        "updatedAt": "2026-11-01T09:00:00"
+        "name": "Lentejas 1 kg",
+        "price": 2290,
+        "createdAt": "2026-11-02T10:00:00",
+        "updatedAt": "2026-11-02T10:00:00"
       },
       "quantity": 2,
-      "total": 9980
+      "total": 4580
     },
-    { "product": { "name": "Fideos spaghetti 400 g", "price": 1090, "...": "..." }, "quantity": 4, "total": 4360 },
-    "... (8 items en total)"
+    { "product": { "name": "Atún en lata 160 g", "price": 1890, "...": "..." }, "quantity": 4, "total": 7560 },
+    "... (10 items en total)"
   ],
-  "total": 43240
+  "total": 37710
 }
 ```
 

@@ -27,6 +27,7 @@ public @interface InvoiceItemsSource {
     enum Source {
         OFFICE,
         SUPERMARKET,
-        JSON
+        JSON,
+        CSV
     }
 }

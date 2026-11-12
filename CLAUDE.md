@@ -25,8 +25,8 @@ Initializr mediante la skill `spring-boot-best-practices`.
 ├── src/main/java/com/andres/course/claude/springboot/springdi/app/
 │   ├── Application.java                # @SpringBootApplication
 │   ├── config/
-│   │   ├── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7) e itemsJson (8, desde JSON, @Primary)
-│   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON)
+│   │   ├── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON) e itemsCsv (10, CSV)
+│   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
 │   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@InvoiceItemsSource) por constructor; getTotal()
@@ -45,6 +45,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail (404, 400)
 ├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo
 ├── src/main/resources/data/invoice-items.json  # 8 items de supermercado que lee el bean itemsJson
+├── src/main/resources/data/invoice-items.csv   # 10 items de supermercado que lee el bean itemsCsv
 ├── src/test/java/.../springdi/app/ApplicationTests.java
 └── .claude/skills/spring-boot-best-practices/  # skill del proyecto
 ```
@@ -63,21 +64,27 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - `Product` e `InvoiceItem` son **POJOs** (no beans): hay varias instancias por
   clase. Las listas de items se crean en `AppConfig` con métodos `@Bean`:
   `itemsOffice` (3 componentes de PC), `itemsSupermarket` (7 productos de
-  supermercado) e `itemsJson` (8 productos leídos de
-  `classpath:data/invoice-items.json`).
+  supermercado), `itemsJson` (8 productos leídos de
+  `classpath:data/invoice-items.json`) e `itemsCsv` (10 productos leídos de
+  `classpath:data/invoice-items.csv`).
 - `itemsJson` recibe por parámetro el `JsonMapper` de Jackson 3 que configura
   Spring Boot (`tools.jackson.databind.json.JsonMapper`) y el archivo como
   `Resource` con `@Value("classpath:...")`; lo deserializa con `TypeReference`.
   Si el archivo no se puede leer, lanza `UncheckedIOException` y la app no arranca.
-- Como hay tres beans `List<InvoiceItem>`, se distinguen con el calificador
+- `itemsCsv` lee el CSV en UTF-8 con `BufferedReader`, salta el encabezado
+  (`name,price,quantity,createdAt,updatedAt`), ignora líneas vacías y convierte
+  cada línea con el método privado `toInvoiceItem` (`split(",")`, sin librerías).
+  Los nombres de producto no deben contener comas.
+- Como hay cuatro beans `List<InvoiceItem>`, se distinguen con el calificador
   personalizado `@InvoiceItemsSource` (meta-anotado con `@Qualifier`), cuyo
   valor es el enum `InvoiceItemsSource.Source` (`OFFICE`, `SUPERMARKET`,
-  `JSON`). Cada `@Bean` de `AppConfig` lleva su origen, e `Invoice` pide el suyo
-  en el parámetro del constructor (actualmente `Source.JSON`). Para usar otra
-  lista basta cambiar el valor del enum. Usa este calificador en vez de
+  `JSON`, `CSV`). Cada `@Bean` de `AppConfig` lleva su origen, e `Invoice` pide
+  el suyo en el parámetro del constructor (actualmente `Source.CSV`). Para usar
+  otra lista basta cambiar el valor del enum. Usa este calificador en vez de
   `@Qualifier("nombre")` para las listas de items.
-- `itemsJson` además es `@Primary`: es la lista que se inyecta cuando alguien
-  pide `List<InvoiceItem>` sin calificador.
+- Ninguna lista es `@Primary`: inyectar `List<InvoiceItem>` sin calificador
+  falla al arrancar (`NoUniqueBeanDefinitionException`). Siempre usa
+  `@InvoiceItemsSource`.
 - Totales calculados (no se guardan): `InvoiceItem.getTotal()` = precio del
   producto × cantidad; `Invoice.getTotal()` = suma de los totales de los items
   con `reduce(BigDecimal.ZERO, BigDecimal::add)` (la alternativa con

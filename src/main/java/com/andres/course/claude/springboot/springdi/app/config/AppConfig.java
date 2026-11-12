@@ -10,10 +10,14 @@ import org.springframework.core.io.Resource;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Configuration
@@ -70,5 +74,31 @@ public class AppConfig {
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo leer " + itemsFile.getFilename(), e);
         }
+    }
+
+    // Items leídos desde src/main/resources/data/invoice-items.csv.
+    // Formato: name,price,quantity,createdAt,updatedAt (la primera línea es el encabezado).
+    @Bean
+    @InvoiceItemsSource(Source.CSV)
+    public List<InvoiceItem> itemsCsv(@Value("classpath:data/invoice-items.csv") Resource itemsFile) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(itemsFile.getInputStream(), StandardCharsets.UTF_8))) {
+            return reader.lines()
+                    .skip(1)                          // salta el encabezado
+                    .filter(line -> !line.isBlank())  // ignora líneas vacías
+                    .map(this::toInvoiceItem)
+                    .toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException("No se pudo leer " + itemsFile.getFilename(), e);
+        }
+    }
+
+    // Convierte una línea del CSV en un InvoiceItem
+    private InvoiceItem toInvoiceItem(String line) {
+        String[] columns = line.split(",");
+        Product product = new Product(columns[0].trim(), new BigDecimal(columns[1].trim()));
+        product.setCreatedAt(LocalDateTime.parse(columns[3].trim()));
+        product.setUpdatedAt(LocalDateTime.parse(columns[4].trim()));
+        return new InvoiceItem(product, Integer.parseInt(columns[2].trim()));
     }
 }
