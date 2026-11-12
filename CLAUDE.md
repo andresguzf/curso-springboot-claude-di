@@ -1,5 +1,58 @@
 # CLAUDE.md
 
+## Proyecto
+
+API REST con Spring Boot del curso (proyecto `2-spring-di`), generada con Spring
+Initializr mediante la skill `spring-boot-best-practices`.
+
+| | |
+|---|---|
+| Spring Boot | 4.1.2 |
+| Java | 25 |
+| Build | Maven con Maven Wrapper (`./mvnw`), packaging jar |
+| Configuración | `src/main/resources/application.properties` (no YAML) |
+| groupId / artifactId | `com.andres.course.claude.springboot` / `2-spring-di` |
+| Package base | `com.andres.course.claude.springboot.springdi.app` |
+| Dependencias | webmvc, validation, springdoc-openapi (Swagger UI), devtools, actuator |
+| Persistencia | ninguna todavía: sin JPA ni PostgreSQL (repositorios en memoria) |
+
+## Estructura actual
+
+```
+2-spring-di/
+├── pom.xml
+├── mvnw, mvnw.cmd, .mvn/wrapper/       # Maven Wrapper
+├── src/main/java/com/andres/course/claude/springboot/springdi/app/
+│   ├── Application.java                # @SpringBootApplication
+│   ├── models/                         # vacío (package-info.java)
+│   ├── dto/                            # vacío (package-info.java)
+│   ├── mappers/                        # vacío (package-info.java)
+│   ├── repositories/                   # vacío (package-info.java)
+│   ├── services/                       # vacío (package-info.java)
+│   ├── controllers/                    # vacío (package-info.java)
+│   └── exceptions/
+│       ├── ResourceNotFoundException.java
+│       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail (404, 400)
+├── src/main/resources/application.properties   # springdoc, actuator, problemdetails
+├── src/test/java/.../springdi/app/ApplicationTests.java
+└── .claude/skills/spring-boot-best-practices/  # skill del proyecto
+```
+
+La clase principal se llama `Application.java` (y no `SpringDiApplication`)
+porque Initializr no genera un nombre de clase a partir de un artifactId que
+empieza con número. No la renombres.
+
+Aún no hay recursos (entity, DTO, service, controller). Al agregar uno, crea el
+conjunto completo siguiendo la skill y reemplaza el `package-info.java` solo si
+el package queda con clases.
+
+## Comandos
+
+- Ejecutar: `./mvnw -DskipTests spring-boot:run`
+- Compilar: `./mvnw -q -DskipTests compile`
+- Tests: `./mvnw test`
+- Swagger UI: http://localhost:8080/swagger-ui.html · Health: http://localhost:8080/actuator/health
+
 ## Available skills
 
 | Skill | Ubicación | Propósito |

@@ -5,16 +5,19 @@ Proyecto del curso de **Spring Boot con Claude Code**. Incluye la skill
 proyectos Spring Boot con una arquitectura en capas y convenciones comunes para
 todo el curso.
 
-> El proyecto Spring Boot todavía no está generado. Se crea pidiéndoselo a
-> Claude Code (ver [Uso](#uso)), y la skill lo genera en este mismo directorio.
+> **Estado actual:** estructura base generada con Spring Initializr (Spring
+> Boot 4.1.2, Java 25). Compila y arranca, pero aún no tiene recursos ni
+> endpoints de negocio: los packages de capas están vacíos y listos para
+> agregar el primero (ver [Uso](#uso)).
 
 ## Contenido
 
 - [Stack](#stack)
 - [Requisitos](#requisitos)
 - [Estructura del repositorio](#estructura-del-repositorio)
+- [Estructura del proyecto Spring Boot](#estructura-del-proyecto-spring-boot)
 - [Uso](#uso)
-- [Arquitectura del proyecto generado](#arquitectura-del-proyecto-generado)
+- [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
 - [Vistas web (monolito)](#vistas-web-monolito)
 - [Ejecutar la aplicación](#ejecutar-la-aplicación)
@@ -26,7 +29,7 @@ todo el curso.
 | | |
 |---|---|
 | Lenguaje | Java 25 |
-| Framework | Spring Boot 4.1.2 o superior (última versión estable de start.spring.io) |
+| Framework | Spring Boot 4.1.2 (la skill usa la última versión estable ≥ 4.1.2 de start.spring.io) |
 | Build | Maven con Maven Wrapper (`./mvnw`) |
 | Packaging | jar |
 | Configuración | `application.properties` |
@@ -56,8 +59,14 @@ No hace falta tener Maven instalado: el proyecto incluye el Maven Wrapper.
 
 ```
 2-spring-di/
-├── CLAUDE.md                                  # skills disponibles y reglas de activación
+├── CLAUDE.md                                  # contexto del proyecto, skills y reglas de activación
 ├── README.md
+├── .gitignore
+├── .gitattributes
+├── pom.xml                                    # proyecto Maven generado por Spring Initializr
+├── mvnw, mvnw.cmd                             # Maven Wrapper
+├── .mvn/wrapper/maven-wrapper.properties
+├── src/                                       # código del proyecto (ver sección siguiente)
 └── .claude/skills/
     ├── spring-boot-best-practices/
     │   ├── SKILL.md                           # instrucciones de la skill
@@ -67,8 +76,42 @@ No hace falta tener Maven instalado: el proyecto incluye el Maven Wrapper.
     │   │   ├── configuration.md               # application.properties y PostgreSQL
     │   │   └── thymeleaf.md                   # layout, fragmentos y vistas con Tailwind
     │   └── evals/evals.json                   # casos de prueba de la skill
-    └── spring-boot-best-practices-workspace/  # resultados de las pruebas (no es parte de la skill)
+    └── spring-boot-best-practices-workspace/  # resultados de las pruebas (excluido en .gitignore)
 ```
+
+Las carpetas `evals/` y `spring-boot-best-practices-workspace/` existen solo en
+local: el `.gitignore` las excluye del repositorio.
+
+## Estructura del proyecto Spring Boot
+
+```
+src/
+├── main/
+│   ├── java/com/andres/course/claude/springboot/springdi/app/
+│   │   ├── Application.java                  # clase principal (@SpringBootApplication)
+│   │   ├── models/package-info.java          # modelos de dominio
+│   │   ├── dto/package-info.java             # DTOs como record
+│   │   ├── mappers/package-info.java         # conversión entity <-> dto
+│   │   ├── repositories/package-info.java    # acceso a datos (en memoria por ahora)
+│   │   ├── services/package-info.java        # interface + implementación
+│   │   ├── controllers/package-info.java     # @RestController
+│   │   └── exceptions/
+│   │       ├── ResourceNotFoundException.java
+│   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
+│   └── resources/
+│       └── application.properties            # Swagger UI, Actuator y ProblemDetail
+└── test/java/com/andres/course/claude/springboot/springdi/app/
+    └── ApplicationTests.java                 # verifica que el contexto arranca
+```
+
+- Los packages de capas solo tienen un `package-info.java` que describe su
+  propósito; se llenan al agregar el primer recurso.
+- La clase principal se llama `Application` y no `SpringDiApplication`, porque
+  Initializr no genera un nombre de clase a partir de un artifactId que empieza
+  con número.
+- Dependencias actuales: `spring-boot-starter-webmvc`, `spring-boot-starter-validation`,
+  `springdoc-openapi-starter-webmvc-ui`, `spring-boot-devtools` y
+  `spring-boot-starter-actuator`. Sin JPA ni PostgreSQL.
 
 ## Uso
 
@@ -76,14 +119,15 @@ Abre Claude Code en este directorio y pídele lo que necesites en lenguaje
 natural. La skill se activa sola cuando la petición encaja con sus reglas
 (definidas en [CLAUDE.md](CLAUDE.md)).
 
-**Crear el proyecto:**
+**Crear el proyecto** (ya hecho en este repositorio; sirve como referencia para
+otros proyectos del curso):
 
 ```text
-Crea una API REST básica con Spring Boot para gestionar productos con nombre, descripción y precio.
+Crea una estructura de Spring Boot para esta carpeta.
 ```
 
 ```text
-Quiero un monolito con Spring Web para gestionar tareas con páginas para listar y crear.
+Crea una API REST básica con Spring Boot para gestionar productos con nombre, descripción y precio.
 ```
 
 **Agregar o modificar capas:**
@@ -118,7 +162,10 @@ Opciones del script (se pueden combinar):
 
 El script nunca sobrescribe archivos existentes y se detiene si ya hay un `pom.xml`.
 
-## Arquitectura del proyecto generado
+## Arquitectura de capas
+
+Estructura completa que sigue la skill a medida que se agregan recursos
+(`config/` y `controllers/web/` aparecen solo cuando hacen falta):
 
 ```
 com.andres.course.claude.springboot.{artifactId}.app/
@@ -225,7 +272,8 @@ aplicación o de ejecutar los tests.
 | http://localhost:8080/swagger-ui.html | Swagger UI |
 | http://localhost:8080/v3/api-docs | Especificación OpenAPI |
 | http://localhost:8080/actuator/health | Estado de la aplicación |
-| http://localhost:8080/api/{recurso} | Endpoints REST de cada recurso |
+| http://localhost:8080/actuator/info | Información de la aplicación |
+| http://localhost:8080/api/{recurso} | Endpoints REST de cada recurso (aún no hay ninguno) |
 
 ## Pruebas de la skill
 
