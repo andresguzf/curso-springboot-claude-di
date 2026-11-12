@@ -91,7 +91,8 @@ src/
 │   ├── java/com/andres/course/claude/springboot/springdi/app/
 │   │   ├── Application.java                  # clase principal (@SpringBootApplication)
 │   │   ├── config/
-│   │   │   └── AppConfig.java                # @Bean con las listas de items (PC y supermercado)
+│   │   │   ├── AppConfig.java                # @Bean con las listas de items (PC, supermercado y JSON)
+│   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
 │   │   │   ├── Invoice.java                  # componente: descripción + Customer e items inyectados + total
@@ -132,7 +133,7 @@ El ejemplo muestra cómo Spring crea los beans y los inyecta unos en otros:
 ```
 Customer (@Component) ─────────────────────┐
                                            ├──▶ Invoice ──▶ InvoiceServiceImpl ──▶ InvoiceController ──▶ GET /api/invoices
-itemsJson (@Bean, @Qualifier) ─────────────┘   (@Component)  (@Service)             (@RestController)
+itemsJson (@Bean, @InvoiceItemsSource) ────┘   (@Component)  (@Service)             (@RestController)
    ▲ lee data/invoice-items.json
 itemsOffice, itemsSupermarket (@Bean, no se usan por ahora)
 ```
@@ -140,7 +141,7 @@ itemsOffice, itemsSupermarket (@Bean, no se usan por ahora)
 | Clase | Rol | Recibe por constructor |
 |---|---|---|
 | `Customer` | componente con `name` y `lastname` | — (valores con `@Value`) |
-| `Invoice` | componente con `description` y `getTotal()` | `Customer` y `List<InvoiceItem>` (con `@Qualifier`) |
+| `Invoice` | componente con `description` y `getTotal()` | `Customer` y `List<InvoiceItem>` (con `@InvoiceItemsSource`) |
 | `AppConfig` | `@Configuration` con tres métodos `@Bean`: `itemsOffice`, `itemsSupermarket` e `itemsJson` | — |
 | `InvoiceItem` | item de la factura: `product`, `quantity` y `getTotal()` (POJO, no es bean) | — |
 | `Product` | `name`, `price` (`BigDecimal`), `createdAt` y `updatedAt` (POJO, no es bean) | — |
@@ -163,16 +164,62 @@ Por eso las listas se arman en `AppConfig` con métodos `@Bean`:
 | `itemsJson` | 8 productos de supermercado leídos de `data/invoice-items.json` |
 
 Como hay tres beans del mismo tipo `List<InvoiceItem>`, Spring no sabe cuál
-inyectar y fallaría al arrancar. `Invoice` lo resuelve con `@Qualifier`:
+inyectar y fallaría al arrancar. Para elegir se usa un **calificador
+personalizado**.
+
+### Calificador personalizado `@InvoiceItemsSource`
+
+En lugar de `@Qualifier("itemsJson")`, el proyecto define su propia anotación
+en `config/InvoiceItemsSource.java`. Se llama así (origen de los items de la
+factura) para no confundirse con la clase `InvoiceItem`:
 
 ```java
-Invoice(Customer customer, @Qualifier("itemsJson") List<InvoiceItem> items) {
+@Target({ElementType.METHOD, ElementType.PARAMETER, ElementType.FIELD, ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Qualifier
+public @interface InvoiceItemsSource {
+
+    Source value();
+
+    enum Source { OFFICE, SUPERMARKET, JSON }
+}
+```
+
+- `@Qualifier` como meta-anotación la convierte en un calificador de Spring.
+- `@Retention(RUNTIME)` permite que Spring la lea con la aplicación en ejecución.
+- El valor es un enum: un error de tipeo (`Source.JSNO`) no compila, mientras
+  que con `@Qualifier("itemsJsno")` el error solo aparece al arrancar.
+
+Cada método `@Bean` de `AppConfig` se marca con su origen:
+
+```java
+@Bean
+@InvoiceItemsSource(Source.OFFICE)
+public List<InvoiceItem> itemsOffice() { ... }
+
+@Bean
+@InvoiceItemsSource(Source.SUPERMARKET)
+public List<InvoiceItem> itemsSupermarket() { ... }
+
+@Bean
+@Primary
+@InvoiceItemsSource(Source.JSON)
+public List<InvoiceItem> itemsJson(...) { ... }
+```
+
+Y `Invoice` pide la lista que necesita en su constructor:
+
+```java
+Invoice(Customer customer, @InvoiceItemsSource(Source.JSON) List<InvoiceItem> items) {
     this.customer = customer;
     this.items = items;
 }
 ```
 
-Para usar otra lista, cambia el qualifier a `"itemsOffice"` o `"itemsSupermarket"`.
+Para usar otra lista, cambia el valor a `Source.OFFICE` o `Source.SUPERMARKET`.
+`itemsJson` además es `@Primary`, así que es la que se inyecta cuando se pide
+una `List<InvoiceItem>` sin ningún calificador.
 
 ### Items desde un archivo JSON
 

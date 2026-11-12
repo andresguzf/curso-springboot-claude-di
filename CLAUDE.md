@@ -25,10 +25,11 @@ Initializr mediante la skill `spring-boot-best-practices`.
 ├── src/main/java/com/andres/course/claude/springboot/springdi/app/
 │   ├── Application.java                # @SpringBootApplication
 │   ├── config/
-│   │   └── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7) e itemsJson (8, desde JSON)
+│   │   ├── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7) e itemsJson (8, desde JSON, @Primary)
+│   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
-│   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@Qualifier) por constructor; getTotal()
+│   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@InvoiceItemsSource) por constructor; getTotal()
 │   │   ├── InvoiceItem.java            # POJO: product, quantity; getTotal() = precio × cantidad
 │   │   └── Product.java                # POJO: name, price (BigDecimal), createdAt, updatedAt
 │   ├── dto/                            # vacío (package-info.java)
@@ -68,9 +69,15 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   Spring Boot (`tools.jackson.databind.json.JsonMapper`) y el archivo como
   `Resource` con `@Value("classpath:...")`; lo deserializa con `TypeReference`.
   Si el archivo no se puede leer, lanza `UncheckedIOException` y la app no arranca.
-- Como hay tres beans `List<InvoiceItem>`, `Invoice` elige cuál recibir con
-  `@Qualifier` en el parámetro del constructor (actualmente `"itemsJson"`).
-  Para usar otra lista basta cambiar el nombre del qualifier.
+- Como hay tres beans `List<InvoiceItem>`, se distinguen con el calificador
+  personalizado `@InvoiceItemsSource` (meta-anotado con `@Qualifier`), cuyo
+  valor es el enum `InvoiceItemsSource.Source` (`OFFICE`, `SUPERMARKET`,
+  `JSON`). Cada `@Bean` de `AppConfig` lleva su origen, e `Invoice` pide el suyo
+  en el parámetro del constructor (actualmente `Source.JSON`). Para usar otra
+  lista basta cambiar el valor del enum. Usa este calificador en vez de
+  `@Qualifier("nombre")` para las listas de items.
+- `itemsJson` además es `@Primary`: es la lista que se inyecta cuando alguien
+  pide `List<InvoiceItem>` sin calificador.
 - Totales calculados (no se guardan): `InvoiceItem.getTotal()` = precio del
   producto × cantidad; `Invoice.getTotal()` = suma de los totales de los items
   con `reduce(BigDecimal.ZERO, BigDecimal::add)` (la alternativa con

@@ -1,5 +1,7 @@
 package com.andres.course.claude.springboot.springdi.app.models;
 
+import com.andres.course.claude.springboot.springdi.app.config.InvoiceItemsSource;
+import com.andres.course.claude.springboot.springdi.app.config.InvoiceItemsSource.Source;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -17,8 +19,8 @@ public class Invoice {
     private String description;
 
     // Hay tres beans List<InvoiceItem> (itemsOffice, itemsSupermarket e itemsJson):
-    // @Qualifier indica cuál inyectar
-    Invoice(Customer customer, List<InvoiceItem> items) {
+    // el calificador personalizado @InvoiceItemsSource indica cuál inyectar
+    Invoice(Customer customer, @InvoiceItemsSource(Source.OFFICE) List<InvoiceItem> items) {
         this.customer = customer;
         this.items = items;
     }

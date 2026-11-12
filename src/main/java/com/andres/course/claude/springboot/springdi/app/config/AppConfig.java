@@ -1,11 +1,11 @@
 package com.andres.course.claude.springboot.springdi.app.config;
 
+import com.andres.course.claude.springboot.springdi.app.config.InvoiceItemsSource.Source;
 import com.andres.course.claude.springboot.springdi.app.models.InvoiceItem;
 import com.andres.course.claude.springboot.springdi.app.models.Product;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.Resource;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -21,6 +21,7 @@ public class AppConfig {
 
     // Items de una compra de componentes de PC
     @Bean
+    @InvoiceItemsSource(Source.OFFICE)
     public List<InvoiceItem> itemsOffice() {
         Product notebook = new Product("Notebook", new BigDecimal("899990"));
         Product mouse = new Product("Mouse inalámbrico", new BigDecimal("19990"));
@@ -35,6 +36,7 @@ public class AppConfig {
 
     // Items de una compra de supermercado
     @Bean
+    @InvoiceItemsSource(Source.SUPERMARKET)
     public List<InvoiceItem> itemsSupermarket() {
         Product milk = new Product("Leche entera 1 L", new BigDecimal("1190"));
         Product bread = new Product("Pan marraqueta 1 kg", new BigDecimal("2490"));
@@ -59,7 +61,7 @@ public class AppConfig {
     // Spring inyecta en los parámetros del método el JsonMapper (Jackson 3)
     // que configura Spring Boot y el archivo del classpath.
     @Bean
-    @Primary
+    @InvoiceItemsSource(Source.JSON)
     public List<InvoiceItem> itemsJson(JsonMapper jsonMapper,
                                        @Value("classpath:data/invoice-items.json") Resource itemsFile) {
         try (InputStream inputStream = itemsFile.getInputStream()) {
