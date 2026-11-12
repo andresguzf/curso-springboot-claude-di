@@ -6,6 +6,7 @@ import com.andres.course.claude.springboot.springdi.app.models.Product;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.Resource;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -65,6 +66,7 @@ public class AppConfig {
     // Spring inyecta en los parámetros del método el JsonMapper (Jackson 3)
     // que configura Spring Boot y el archivo del classpath.
     @Bean
+    @Primary
     @InvoiceItemsSource(Source.JSON)
     public List<InvoiceItem> itemsJson(JsonMapper jsonMapper,
                                        @Value("classpath:data/invoice-items.json") Resource itemsFile) {

@@ -137,7 +137,8 @@ Customer (@Component) ───────────────────�
                                            ├──▶ Invoice ──▶ InvoiceServiceImpl ──▶ InvoiceController ──▶ GET /api/invoices
 itemsCsv (@Bean, @InvoiceItemsSource) ─────┘   (@Component)  (@Service)             (@RestController)
    ▲ lee data/invoice-items.csv
-itemsOffice, itemsSupermarket, itemsJson (@Bean, no se usan por ahora)
+itemsOffice, itemsSupermarket (@Bean, no se usan por ahora)
+itemsJson (@Bean, @Primary: se usa donde no hay calificador)
 ```
 
 | Clase | Rol | Recibe por constructor |
@@ -206,6 +207,7 @@ public List<InvoiceItem> itemsOffice() { ... }
 public List<InvoiceItem> itemsSupermarket() { ... }
 
 @Bean
+@Primary
 @InvoiceItemsSource(Source.JSON)
 public List<InvoiceItem> itemsJson(...) { ... }
 
@@ -224,9 +226,11 @@ Invoice(Customer customer, @InvoiceItemsSource(Source.CSV) List<InvoiceItem> ite
 ```
 
 Para usar otra lista, cambia el valor a `Source.OFFICE`, `Source.SUPERMARKET` o
-`Source.JSON`. Ninguna lista es `@Primary`, así que pedir una
-`List<InvoiceItem>` sin calificador falla al arrancar
-(`NoUniqueBeanDefinitionException`): siempre hay que indicar el origen.
+`Source.JSON`.
+
+`itemsJson` además es `@Primary`: es la lista que se inyecta cuando se pide una
+`List<InvoiceItem>` sin ningún calificador. Cuando hay un calificador, como en
+`Invoice`, el calificador manda sobre `@Primary`.
 
 ### Items desde un archivo JSON
 

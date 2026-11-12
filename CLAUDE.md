@@ -25,7 +25,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 ├── src/main/java/com/andres/course/claude/springboot/springdi/app/
 │   ├── Application.java                # @SpringBootApplication
 │   ├── config/
-│   │   ├── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON) e itemsCsv (10, CSV)
+│   │   ├── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
 │   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
@@ -82,9 +82,10 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   el suyo en el parámetro del constructor (actualmente `Source.CSV`). Para usar
   otra lista basta cambiar el valor del enum. Usa este calificador en vez de
   `@Qualifier("nombre")` para las listas de items.
-- Ninguna lista es `@Primary`: inyectar `List<InvoiceItem>` sin calificador
-  falla al arrancar (`NoUniqueBeanDefinitionException`). Siempre usa
-  `@InvoiceItemsSource`.
+- `itemsJson` es `@Primary`: es la lista que se inyecta cuando se pide
+  `List<InvoiceItem>` sin calificador. Un calificador explícito
+  (`@InvoiceItemsSource`) siempre tiene prioridad sobre `@Primary`. No quites
+  `@Primary` de `itemsJson`.
 - Totales calculados (no se guardan): `InvoiceItem.getTotal()` = precio del
   producto × cantidad; `Invoice.getTotal()` = suma de los totales de los items
   con `reduce(BigDecimal.ZERO, BigDecimal::add)` (la alternativa con
