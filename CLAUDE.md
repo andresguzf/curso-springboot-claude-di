@@ -24,16 +24,25 @@ Initializr mediante la skill `spring-boot-best-practices`.
 ├── mvnw, mvnw.cmd, .mvn/wrapper/       # Maven Wrapper
 ├── src/main/java/com/andres/course/claude/springboot/springdi/app/
 │   ├── Application.java                # @SpringBootApplication
-│   ├── models/                         # vacío (package-info.java)
+│   ├── config/
+│   │   └── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC) e itemsSupermarket (7)
+│   ├── models/
+│   │   ├── Customer.java               # @Component: name, lastname (@Value)
+│   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@Qualifier) por constructor; getTotal()
+│   │   ├── InvoiceItem.java            # POJO: product, quantity; getTotal() = precio × cantidad
+│   │   └── Product.java                # POJO: name, price (BigDecimal), createdAt, updatedAt
 │   ├── dto/                            # vacío (package-info.java)
 │   ├── mappers/                        # vacío (package-info.java)
 │   ├── repositories/                   # vacío (package-info.java)
-│   ├── services/                       # vacío (package-info.java)
-│   ├── controllers/                    # vacío (package-info.java)
+│   ├── services/
+│   │   ├── InvoiceService.java         # contrato: Invoice getInvoice()
+│   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor
+│   ├── controllers/
+│   │   └── InvoiceController.java      # GET /api/invoices, recibe InvoiceService por constructor
 │   └── exceptions/
 │       ├── ResourceNotFoundException.java
 │       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail (404, 400)
-├── src/main/resources/application.properties   # springdoc, actuator, problemdetails
+├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo
 ├── src/test/java/.../springdi/app/ApplicationTests.java
 └── .claude/skills/spring-boot-best-practices/  # skill del proyecto
 ```
@@ -42,9 +51,41 @@ La clase principal se llama `Application.java` (y no `SpringDiApplication`)
 porque Initializr no genera un nombre de clase a partir de un artifactId que
 empieza con número. No la renombres.
 
-Aún no hay recursos (entity, DTO, service, controller). Al agregar uno, crea el
-conjunto completo siguiendo la skill y reemplaza el `package-info.java` solo si
-el package queda con clases.
+### Ejemplo de inyección de dependencias (Invoice / Customer)
+
+El proyecto es un ejemplo didáctico de DI, construido paso a paso:
+
+- `Customer` e `Invoice` son **beans `@Component`** (singleton), no entidades de
+  datos. Sus valores vienen de `application.properties` (`customer.name`,
+  `customer.lastname`, `invoice.description`) mediante `@Value`.
+- `Product` e `InvoiceItem` son **POJOs** (no beans): hay varias instancias por
+  clase. Las listas de items se crean en `AppConfig` con métodos `@Bean`:
+  `itemsOffice` (3 componentes de PC) e `itemsSupermarket` (7 productos de
+  supermercado).
+- Como hay dos beans `List<InvoiceItem>`, `Invoice` elige cuál recibir con
+  `@Qualifier` en el parámetro del constructor (actualmente `"itemsOffice"`).
+  Para usar la otra lista basta cambiar el nombre del qualifier.
+- Totales calculados (no se guardan): `InvoiceItem.getTotal()` = precio del
+  producto × cantidad; `Invoice.getTotal()` = suma de los totales de los items
+  con `reduce(BigDecimal.ZERO, BigDecimal::add)` (la alternativa con
+  `mapToDouble().sum()` queda comentada en el código).
+  Ambos son `BigDecimal` y Jackson los incluye en el JSON como `total`.
+- Cadena de inyección: `Customer` + `List<InvoiceItem>` → `Invoice` →
+  `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
+  interfaz `InvoiceService`.
+- `GET /api/invoices` devuelve el bean `Invoice` serializado a JSON, con
+  cliente, descripción, items con su total y el total de la factura (incluye
+  `createdAt`/`updatedAt` del producto porque aún no hay DTOs).
+- Por decisión del curso, en esta etapa **no** hay DTOs, mapper ni repository:
+  el service devuelve `Invoice` directamente. No los agregues salvo que el
+  usuario lo pida.
+
+### Convenciones del proyecto
+
+- Inyección **por constructor** con campos `final` y sin `@Autowired` (un solo
+  constructor). No uses inyección por atributo ni por setter.
+- Los packages `dto`, `mappers` y `repositories` siguen vacíos (solo
+  `package-info.java`); se llenan cuando el curso llegue a esas capas.
 
 ## Comandos
 
@@ -52,6 +93,7 @@ el package queda con clases.
 - Compilar: `./mvnw -q -DskipTests compile`
 - Tests: `./mvnw test`
 - Swagger UI: http://localhost:8080/swagger-ui.html · Health: http://localhost:8080/actuator/health
+- Endpoint de ejemplo: http://localhost:8080/api/invoices
 
 ## Available skills
 

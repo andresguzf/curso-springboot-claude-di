@@ -6,9 +6,9 @@ proyectos Spring Boot con una arquitectura en capas y convenciones comunes para
 todo el curso.
 
 > **Estado actual:** estructura base generada con Spring Initializr (Spring
-> Boot 4.1.2, Java 25). Compila y arranca, pero aún no tiene recursos ni
-> endpoints de negocio: los packages de capas están vacíos y listos para
-> agregar el primero (ver [Uso](#uso)).
+> Boot 4.1.2, Java 25) y un ejemplo de **inyección de dependencias** con los
+> componentes `Invoice` y `Customer`, items de factura con sus productos, un
+> service y un controller que expone `GET /api/invoices`.
 
 ## Contenido
 
@@ -16,6 +16,7 @@ todo el curso.
 - [Requisitos](#requisitos)
 - [Estructura del repositorio](#estructura-del-repositorio)
 - [Estructura del proyecto Spring Boot](#estructura-del-proyecto-spring-boot)
+- [Ejemplo de inyección de dependencias](#ejemplo-de-inyección-de-dependencias)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -89,29 +90,151 @@ src/
 ├── main/
 │   ├── java/com/andres/course/claude/springboot/springdi/app/
 │   │   ├── Application.java                  # clase principal (@SpringBootApplication)
-│   │   ├── models/package-info.java          # modelos de dominio
-│   │   ├── dto/package-info.java             # DTOs como record
-│   │   ├── mappers/package-info.java         # conversión entity <-> dto
-│   │   ├── repositories/package-info.java    # acceso a datos (en memoria por ahora)
-│   │   ├── services/package-info.java        # interface + implementación
-│   │   ├── controllers/package-info.java     # @RestController
+│   │   ├── config/
+│   │   │   └── AppConfig.java                # @Bean con las listas de items (PC y supermercado)
+│   │   ├── models/
+│   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
+│   │   │   ├── Invoice.java                  # componente: descripción + Customer e items inyectados + total
+│   │   │   ├── InvoiceItem.java              # item: producto, cantidad y total
+│   │   │   └── Product.java                  # producto: nombre, precio y fechas
+│   │   ├── dto/package-info.java             # DTOs como record (vacío por ahora)
+│   │   ├── mappers/package-info.java         # conversión entity <-> dto (vacío por ahora)
+│   │   ├── repositories/package-info.java    # acceso a datos (vacío por ahora)
+│   │   ├── services/
+│   │   │   ├── InvoiceService.java           # contrato del service
+│   │   │   └── InvoiceServiceImpl.java       # implementación (@Service)
+│   │   ├── controllers/
+│   │   │   └── InvoiceController.java        # GET /api/invoices
 │   │   └── exceptions/
 │   │       ├── ResourceNotFoundException.java
 │   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
 │   └── resources/
-│       └── application.properties            # Swagger UI, Actuator y ProblemDetail
+│       └── application.properties            # Swagger UI, Actuator, ProblemDetail y datos de ejemplo
 └── test/java/com/andres/course/claude/springboot/springdi/app/
     └── ApplicationTests.java                 # verifica que el contexto arranca
 ```
 
-- Los packages de capas solo tienen un `package-info.java` que describe su
-  propósito; se llenan al agregar el primer recurso.
+- Los packages `dto`, `mappers` y `repositories` solo tienen un
+  `package-info.java` que describe su propósito; se llenarán en las siguientes
+  etapas del curso.
 - La clase principal se llama `Application` y no `SpringDiApplication`, porque
   Initializr no genera un nombre de clase a partir de un artifactId que empieza
   con número.
 - Dependencias actuales: `spring-boot-starter-webmvc`, `spring-boot-starter-validation`,
   `springdoc-openapi-starter-webmvc-ui`, `spring-boot-devtools` y
   `spring-boot-starter-actuator`. Sin JPA ni PostgreSQL.
+
+## Ejemplo de inyección de dependencias
+
+El ejemplo muestra cómo Spring crea los beans y los inyecta unos en otros:
+
+```
+Customer (@Component) ─────────────────────┐
+                                           ├──▶ Invoice ──▶ InvoiceServiceImpl ──▶ InvoiceController ──▶ GET /api/invoices
+itemsOffice (@Bean, @Qualifier) ───────────┘   (@Component)  (@Service)             (@RestController)
+itemsSupermarket (@Bean, no se usa por ahora)
+```
+
+| Clase | Rol | Recibe por constructor |
+|---|---|---|
+| `Customer` | componente con `name` y `lastname` | — (valores con `@Value`) |
+| `Invoice` | componente con `description` y `getTotal()` | `Customer` y `List<InvoiceItem>` (con `@Qualifier`) |
+| `AppConfig` | `@Configuration` con dos métodos `@Bean`: `itemsOffice` e `itemsSupermarket` | — |
+| `InvoiceItem` | item de la factura: `product`, `quantity` y `getTotal()` (POJO, no es bean) | — |
+| `Product` | `name`, `price` (`BigDecimal`), `createdAt` y `updatedAt` (POJO, no es bean) | — |
+| `InvoiceService` / `InvoiceServiceImpl` | lógica de negocio, desacoplada del controller | `Invoice` |
+| `InvoiceController` | expone el endpoint REST | `InvoiceService` (la interfaz) |
+
+Toda la inyección es **por constructor**, con campos `final` y sin
+`@Autowired`: cuando una clase tiene un solo constructor, Spring lo usa
+automáticamente. Así las dependencias son inmutables, quedan visibles en un
+solo lugar y la clase se puede probar sin levantar Spring.
+
+`Product` e `InvoiceItem` no son `@Component` porque son objetos de datos con
+varias instancias distintas (un `@Component` es una sola instancia por clase).
+Por eso las listas se arman en `AppConfig` con métodos `@Bean`:
+
+| Bean | Productos |
+|---|---|
+| `itemsOffice` | 3 componentes de PC: notebook, mouse inalámbrico y monitor |
+| `itemsSupermarket` | 7 productos de supermercado: leche, pan, arroz, huevos, manzanas, aceite y azúcar |
+
+Como hay dos beans del mismo tipo `List<InvoiceItem>`, Spring no sabe cuál
+inyectar y fallaría al arrancar. `Invoice` lo resuelve con `@Qualifier`:
+
+```java
+Invoice(Customer customer, @Qualifier("itemsOffice") List<InvoiceItem> items) {
+    this.customer = customer;
+    this.items = items;
+}
+```
+
+Para que la factura use los productos de supermercado, cambia el qualifier a
+`"itemsSupermarket"`.
+
+### Total de la factura
+
+Los totales se calculan a partir de los items, no se guardan:
+
+```java
+// InvoiceItem: precio del producto por la cantidad
+public BigDecimal getTotal() {
+    return product.getPrice().multiply(BigDecimal.valueOf(quantity));
+}
+
+// Invoice: suma de los totales de cada item con reduce
+public BigDecimal getTotal() {
+    return items.stream()
+            .map(InvoiceItem::getTotal)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+}
+```
+
+`reduce` parte de `BigDecimal.ZERO` y va sumando cada total con
+`BigDecimal::add`, así la suma es exacta. En el código queda comentada una
+alternativa con `mapToDouble(...).sum()`: `sum()` solo existe en los streams
+numéricos (`DoubleStream`, `IntStream`, `LongStream`), por lo que obliga a
+pasar por `double` y puede perder precisión con montos decimales.
+
+Como son getters, Jackson los incluye en el JSON como `total`, tanto en cada
+item como en la factura. Se usa `BigDecimal` para no perder precisión con
+montos de dinero.
+
+Los valores del cliente y la descripción vienen de `application.properties`:
+
+```properties
+customer.name=John
+customer.lastname=Doe
+invoice.description=Compras de supermercado
+```
+
+Respuesta de `GET /api/invoices`:
+
+```json
+{
+  "customer": { "lastname": "Doe", "name": "John" },
+  "description": "Compras de supermercado",
+  "items": [
+    {
+      "product": {
+        "name": "Notebook",
+        "price": 899990,
+        "createdAt": "2026-11-12T17:30:00.000000",
+        "updatedAt": "2026-11-12T17:30:00.000000"
+      },
+      "quantity": 1,
+      "total": 899990
+    },
+    { "product": { "name": "Mouse inalámbrico", "price": 19990, "...": "..." }, "quantity": 2, "total": 39980 },
+    { "product": { "name": "Monitor 27\"", "price": 249990, "...": "..." }, "quantity": 2, "total": 499980 }
+  ],
+  "total": 1439950
+}
+```
+
+En esta etapa el service devuelve el componente `Invoice` directamente, por eso
+la respuesta incluye las fechas `createdAt`/`updatedAt` del producto. Los DTOs
+(que las ocultarán), el mapper y los repositorios se incorporarán más adelante.
 
 ## Uso
 
@@ -273,7 +396,7 @@ aplicación o de ejecutar los tests.
 | http://localhost:8080/v3/api-docs | Especificación OpenAPI |
 | http://localhost:8080/actuator/health | Estado de la aplicación |
 | http://localhost:8080/actuator/info | Información de la aplicación |
-| http://localhost:8080/api/{recurso} | Endpoints REST de cada recurso (aún no hay ninguno) |
+| http://localhost:8080/api/invoices | Factura de ejemplo con su cliente e items |
 
 ## Pruebas de la skill
 
