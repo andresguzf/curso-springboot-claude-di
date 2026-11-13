@@ -18,6 +18,7 @@ todo el curso.
 - [Estructura del proyecto Spring Boot](#estructura-del-proyecto-spring-boot)
 - [Ejemplo de inyección de dependencias](#ejemplo-de-inyección-de-dependencias)
 - [Ciclo de vida del componente Invoice](#ciclo-de-vida-del-componente-invoice)
+- [Una sola instancia: Invoice es singleton](#una-sola-instancia-invoice-es-singleton)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -106,7 +107,7 @@ src/
 │   │   │   ├── InvoiceService.java           # contrato del service
 │   │   │   └── InvoiceServiceImpl.java       # implementación (@Service)
 │   │   ├── controllers/
-│   │   │   └── InvoiceController.java        # GET /api/invoices
+│   │   │   └── InvoiceController.java        # GET /api/invoices (registra instancia y hashCode)
 │   │   └── exceptions/
 │   │       ├── ResourceNotFoundException.java
 │   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
@@ -393,6 +394,8 @@ Invoice(Customer customer, @InvoiceItemsSource(Source.CSV) List<InvoiceItem> ite
     this.items = items;
     // Aquí description todavía es null: @Value se inyecta después del constructor
     log.info("Constructor de Invoice: description = {}", description);
+    // Instancia creada por Spring: toString() por defecto muestra Clase@hashCode (en hexadecimal)
+    log.info("Constructor de Invoice: instancia = {} | hashCode = {}", this, this.hashCode());
 }
 
 @PostConstruct
@@ -417,9 +420,41 @@ log muestra:
 
 ```
 Constructor de Invoice: description = null
+Constructor de Invoice: instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
 @PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
 @PreDestroy: el componente Invoice se va a destruir
 ```
+
+### Una sola instancia: `Invoice` es singleton
+
+Además del constructor, `show()` en `InvoiceController` registra la factura que
+devuelve:
+
+```java
+@GetMapping
+public Invoice show() {
+    Invoice invoice = invoiceService.getInvoice();
+    // Es singleton: la instancia y el hashCode son los mismos que en el constructor
+    log.info("show(): instancia = {} | hashCode = {}", invoice, invoice.hashCode());
+    return invoice;
+}
+```
+
+Al arrancar la aplicación y llamar dos veces a `GET /api/invoices`, el log
+muestra siempre el mismo objeto:
+
+```
+Constructor de Invoice: instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
+show(): instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
+show(): instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
+```
+
+- El alcance por defecto de un bean en Spring es **singleton**: se crea una
+  sola vez al arrancar y la misma instancia se comparte en toda la aplicación.
+- `Invoice@739265f1` es el `toString()` por defecto de Java: nombre de la clase
+  y `hashCode` en hexadecimal (`739265f1` = `1938974193` en decimal).
+- El valor exacto del `hashCode` cambia en cada ejecución, pero dentro de una
+  misma ejecución se repite.
 
 ## Uso
 

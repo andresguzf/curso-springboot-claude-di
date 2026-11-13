@@ -31,6 +31,8 @@ public class Invoice {
         this.items = items;
         // Aquí description todavía es null: @Value se inyecta después del constructor
         log.info("Constructor de Invoice: description = {}", description);
+        // Instancia creada por Spring: toString() por defecto muestra Clase@hashCode (en hexadecimal)
+        log.info("Constructor de Invoice: instancia = {} | hashCode = {}", this, this.hashCode());
     }
 
     // Ciclo de vida: se ejecuta una vez, después del constructor y de inyectar

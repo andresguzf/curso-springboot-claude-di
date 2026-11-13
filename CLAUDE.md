@@ -39,7 +39,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   ├── InvoiceService.java         # contrato: Invoice getInvoice()
 │   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor
 │   ├── controllers/
-│   │   └── InvoiceController.java      # GET /api/invoices, recibe InvoiceService por constructor
+│   │   └── InvoiceController.java      # GET /api/invoices, recibe InvoiceService por constructor; registra instancia y hashCode
 │   └── exceptions/
 │       ├── ResourceNotFoundException.java
 │       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail (404, 400)
@@ -97,6 +97,10 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   resumen corto (descripción, cantidad de items y total); `destroy()` con
   `@PreDestroy` solo avisa que el componente se va a destruir. Los logs usan
   SLF4J. Mantén esos mensajes cortos.
+- Demostración de singleton: el constructor de `Invoice` y `show()` de
+  `InvoiceController` registran la instancia (`toString()` por defecto,
+  `Clase@hashCode` en hexadecimal) y su `hashCode()`. Siempre es la misma
+  instancia. No sobrescribas `toString()` en `Invoice`: ocultaría esa información.
 - Cadena de inyección: `Customer` + `List<InvoiceItem>` → `Invoice` →
   `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
   interfaz `InvoiceService`.
