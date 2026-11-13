@@ -20,6 +20,7 @@ todo el curso.
 - [Ciclo de vida del componente Invoice](#ciclo-de-vida-del-componente-invoice)
 - [Alcance por sesión: @SessionScope](#alcance-por-sesión-sessionscope)
 - [Interceptor: tiempo de cada request](#interceptor-tiempo-de-cada-request)
+- [Controller de ejemplo: AppController](#controller-de-ejemplo-appcontroller)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -96,7 +97,7 @@ src/
 │   │   ├── config/
 │   │   │   ├── AppConfig.java                # @Bean ContextCleanupListener + listas de items (PC, supermercado, JSON y CSV)
 │   │   │   ├── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
-│   │   │   └── WebMvcConfig.java             # registra el interceptor para todos los endpoints
+│   │   │   └── WebMvcConfig.java             # registra el interceptor (todos los endpoints salvo date y languages)
 │   │   ├── interceptors/
 │   │   │   ├── LoadingTimeInterceptor.java   # mide el tiempo de cada request y lo registra en el log
 │   │   │   └── ElapsedTimeResponseAdvice.java # agrega "elapsedMs" al JSON de respuesta
@@ -112,6 +113,7 @@ src/
 │   │   │   ├── InvoiceService.java           # contrato del service
 │   │   │   └── InvoiceServiceImpl.java       # implementación (@Service)
 │   │   ├── controllers/
+│   │   │   ├── AppController.java            # GET /api/app/greeting, /date y /languages
 │   │   │   └── InvoiceController.java        # GET /api/invoices y POST /api/invoices/close
 │   │   └── exceptions/
 │   │       ├── ResourceNotFoundException.java
@@ -666,6 +668,7 @@ proyecto usa uno para medir cuánto tarda cada request.
 public class LoadingTimeInterceptor implements HandlerInterceptor {
 
     private static final String START_TIME = LoadingTimeInterceptor.class.getName() + ".startTime";
+    private static final String ELAPSED_MS = LoadingTimeInterceptor.class.getName() + ".elapsedMs";
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -683,9 +686,15 @@ public class LoadingTimeInterceptor implements HandlerInterceptor {
         }
     }
 
+    // Se calcula una sola vez por request: la primera llamada fija el valor
     public static Long elapsedMillis(HttpServletRequest request) {
+        if (request.getAttribute(ELAPSED_MS) instanceof Long elapsed) {
+            return elapsed;
+        }
         if (request.getAttribute(START_TIME) instanceof Long start) {
-            return (System.nanoTime() - start) / 1_000_000;
+            long elapsed = (System.nanoTime() - start) / 1_000_000;
+            request.setAttribute(ELAPSED_MS, elapsed);
+            return elapsed;
         }
         return null;
     }
@@ -695,7 +704,7 @@ public class LoadingTimeInterceptor implements HandlerInterceptor {
 | Método | Cuándo se ejecuta | Qué hace |
 |---|---|---|
 | `preHandle()` | Antes del controller | Guarda el instante de inicio. Devuelve `true` para que la petición siga; con `false` la cortaría. |
-| `afterCompletion()` | Al terminar la petición, incluso si hubo una excepción | Calcula el tiempo y lo registra en el log. |
+| `afterCompletion()` | Al terminar la petición, incluso si hubo una excepción | Registra el tiempo en el log. |
 
 El tiempo de inicio se guarda como **atributo del request** y no en un campo de
 la clase: el interceptor es un singleton compartido por todas las peticiones, y
@@ -715,10 +724,16 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(loadingTimeInterceptor).addPathPatterns("/**");
+        registry.addInterceptor(loadingTimeInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/api/app/date", "/api/app/languages");
     }
 }
 ```
+
+`addPathPatterns("/**")` aplica el interceptor a todos los endpoints, y
+`excludePathPatterns(...)` deja fuera `/api/app/date` y `/api/app/languages`:
+esas rutas no se miden, no aparecen en el log y su JSON no lleva `elapsedMs`.
 
 El log muestra, por cada petición:
 
@@ -768,8 +783,59 @@ public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
 - Se limita con `basePackages` a los controllers del proyecto: así no altera el
   JSON de Swagger (`/v3/api-docs`) ni los errores que Spring Boot genera fuera
   de los controllers (por ejemplo, el 404 de una ruta que no existe).
-- `elapsedMs` es algo menor que el tiempo del log: el JSON se arma antes de
-  escribir la respuesta, y el log se escribe cuando ya terminó.
+- `elapsedMs` y el log muestran **exactamente el mismo número**.
+  `elapsedMillis(request)` calcula el tiempo una sola vez por request y lo
+  guarda: el advice lo pide primero, al armar el JSON, y `afterCompletion()`
+  reutiliza ese valor. Por eso el log mide hasta que se arma el JSON, sin el
+  tiempo de escribir la respuesta (casi siempre menos de 1 ms). En respuestas
+  sin body, como el 204 de `/close`, se calcula al terminar la petición.
+
+| Petición | `elapsedMs` en el JSON | Log |
+|---|---|---|
+| `GET /api/invoices` | 28 | `status 200 en 28 ms` |
+| `GET /api/app/greeting` | 2 | `status 200 en 2 ms` |
+| `POST /api/invoices/close` | sin body | `status 204 en 1 ms` |
+
+## Controller de ejemplo: `AppController`
+
+Controller simple bajo `/api/app` con tres endpoints, para ver el interceptor
+en acción. No tiene service porque no hay lógica de negocio.
+
+```java
+@RestController
+@RequestMapping("/api/app")
+public class AppController {
+
+    @GetMapping("/greeting")
+    public Map<String, String> greeting(@RequestParam(defaultValue = "mundo") String name) {
+        return Map.of("message", "Hola, " + name + "!");
+    }
+
+    @GetMapping("/date")
+    public Map<String, Object> date() {
+        return Map.of("date", LocalDate.now(), "dateTime", LocalDateTime.now());
+    }
+
+    @GetMapping("/languages")
+    public List<String> languages() {
+        return List.of("Java", "Kotlin", "JavaScript", "TypeScript", "Python", "Go");
+    }
+}
+```
+
+| Endpoint | Interceptor | Respuesta |
+|---|---|---|
+| `GET /api/app/greeting` | Sí | `{"message":"Hola, mundo!","elapsedMs":13}` |
+| `GET /api/app/greeting?name=Ana` | Sí | `{"message":"Hola, Ana!","elapsedMs":1}` |
+| `GET /api/app/date` | Excluido | `{"date":"2026-11-13","dateTime":"2026-11-13T19:19:23.675031"}` |
+| `GET /api/app/languages` | Excluido | `["Java","Kotlin","JavaScript","TypeScript","Python","Go"]` |
+
+- `greeting` y `date` devuelven un `Map` para que la respuesta sea un objeto
+  JSON; con un `String` sería texto plano y el advice no le agregaría `elapsedMs`.
+- `languages` devuelve la lista tal cual: como está excluida del interceptor,
+  no se envuelve en `{ "data": [...] }`.
+- `Map.of` no garantiza el orden de los campos, así que en `date` pueden salir
+  en cualquier orden.
 
 ## Uso
 
@@ -933,6 +999,9 @@ aplicación o de ejecutar los tests.
 | http://localhost:8080/actuator/info | Información de la aplicación |
 | http://localhost:8080/api/invoices | Factura de ejemplo con su cliente e items |
 | `POST` http://localhost:8080/api/invoices/close | Cierra solo la factura de la sesión actual (ejecuta su `@PreDestroy`) |
+| http://localhost:8080/api/app/greeting | Saludo (`?name=` opcional), con `elapsedMs` |
+| http://localhost:8080/api/app/date | Fecha y fecha-hora del servidor (excluido del interceptor) |
+| http://localhost:8080/api/app/languages | Lista de lenguajes (excluido del interceptor) |
 
 ## Pruebas de la skill
 

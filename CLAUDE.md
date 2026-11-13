@@ -27,7 +27,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   ├── config/
 │   │   ├── AppConfig.java              # @Configuration: @Bean ContextCleanupListener, sessionTimeoutListener + itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
 │   │   ├── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
-│   │   └── WebMvcConfig.java           # WebMvcConfigurer: registra LoadingTimeInterceptor en "/**"
+│   │   └── WebMvcConfig.java           # WebMvcConfigurer: registra LoadingTimeInterceptor en "/**" excepto /api/app/date y /api/app/languages
 │   ├── interceptors/
 │   │   ├── LoadingTimeInterceptor.java     # HandlerInterceptor: mide el tiempo de cada request y lo registra en el log
 │   │   └── ElapsedTimeResponseAdvice.java  # ResponseBodyAdvice: agrega "elapsedMs" al JSON de los controllers
@@ -43,6 +43,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   ├── InvoiceService.java         # contrato: Invoice getInvoice(), void closeInvoice()
 │   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor; closeInvoice() quita la factura de la sesión
 │   ├── controllers/
+│   │   ├── AppController.java          # GET /api/app/greeting, /api/app/date, /api/app/languages (ejemplos simples)
 │   │   └── InvoiceController.java      # GET /api/invoices (registra instancia y hashCode) y POST /api/invoices/close (cierra solo la factura)
 │   └── exceptions/
 │       ├── ResourceNotFoundException.java
@@ -161,11 +162,23 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 ### Interceptor de tiempo y `elapsedMs`
 
 - `LoadingTimeInterceptor` (`@Component`, `HandlerInterceptor`) se registra en
-  `WebMvcConfig` con `addPathPatterns("/**")`. `preHandle()` guarda
-  `System.nanoTime()` como **atributo del request** (el interceptor es singleton:
-  nunca guardes estado de la petición en un campo) y `afterCompletion()`
-  registra método, URI, status y milisegundos. El método estático
-  `elapsedMillis(request)` calcula el tiempo desde `preHandle()`.
+  `WebMvcConfig` con `addPathPatterns("/**")` y
+  `excludePathPatterns("/api/app/date", "/api/app/languages")`. `preHandle()`
+  guarda `System.nanoTime()` como **atributo del request** (el interceptor es
+  singleton: nunca guardes estado de la petición en un campo) y
+  `afterCompletion()` registra método, URI, status y milisegundos.
+- El método estático `elapsedMillis(request)` calcula el tiempo **una sola vez
+  por request** y lo guarda como atributo: la primera llamada fija el valor y
+  las siguientes devuelven el mismo. El advice lo pide primero al armar el
+  JSON y `afterCompletion()` después, así el log y `elapsedMs` muestran
+  **exactamente el mismo número**. Es un requisito: no vuelvas a calcularlo por
+  separado. En respuestas sin body (204) se calcula al terminar.
+- Las rutas excluidas no se miden, no aparecen en el log y su JSON no lleva
+  `elapsedMs` (el advice solo lo agrega si el interceptor midió el request);
+  `languages` devuelve la lista sin el envoltorio `data`.
+- `AppController` (`/api/app`): `greeting` (`?name=`, por defecto "mundo"),
+  `date` (fecha y fecha-hora) y `languages` (lista). Devuelve `Map`/`List` sin
+  service: son ejemplos para el interceptor, sin lógica de negocio.
 - `ElapsedTimeResponseAdvice` (`@RestControllerAdvice` + `ResponseBodyAdvice`)
   agrega `elapsedMs` al JSON antes de escribirlo (un interceptor no puede: el
   body de un `@RestController` ya está escrito en `postHandle()`). Objetos:
@@ -194,6 +207,7 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - Tests: `./mvnw test`
 - Swagger UI: http://localhost:8080/swagger-ui.html · Health: http://localhost:8080/actuator/health
 - Endpoint de ejemplo: http://localhost:8080/api/invoices
+- Ejemplos simples: http://localhost:8080/api/app/greeting, `/api/app/date`, `/api/app/languages`
 - Cerrar la sesión (POST): `curl -X POST -b cookies.txt http://localhost:8080/api/invoices/close`
 
 ## Available skills

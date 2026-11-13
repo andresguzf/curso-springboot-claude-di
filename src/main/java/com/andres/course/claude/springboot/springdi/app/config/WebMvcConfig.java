@@ -15,9 +15,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
         this.loadingTimeInterceptor = loadingTimeInterceptor;
     }
 
-    // "/**" aplica el interceptor a todos los endpoints
+    // "/**" aplica el interceptor a todos los endpoints, excepto los excluidos.
+    // /api/app/date y /api/app/languages quedan fuera: no se miden, no se registran
+    // en el log y su JSON no lleva "elapsedMs" (el advice solo lo agrega si el
+    // interceptor midió el request).
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(loadingTimeInterceptor).addPathPatterns("/**");
+        registry.addInterceptor(loadingTimeInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/api/app/date", "/api/app/languages");
     }
 }
