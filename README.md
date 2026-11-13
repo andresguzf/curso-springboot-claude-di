@@ -18,7 +18,7 @@ todo el curso.
 - [Estructura del proyecto Spring Boot](#estructura-del-proyecto-spring-boot)
 - [Ejemplo de inyección de dependencias](#ejemplo-de-inyección-de-dependencias)
 - [Ciclo de vida del componente Invoice](#ciclo-de-vida-del-componente-invoice)
-- [Una sola instancia: Invoice es singleton](#una-sola-instancia-invoice-es-singleton)
+- [Alcance de aplicación: @ApplicationScope](#alcance-de-aplicación-applicationscope)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -97,7 +97,7 @@ src/
 │   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
-│   │   │   ├── Invoice.java                  # componente: descripción + Customer e items inyectados + total + ciclo de vida
+│   │   │   ├── Invoice.java                  # componente @ApplicationScope: descripción + Customer e items + total + ciclo de vida
 │   │   │   ├── InvoiceItem.java              # item: producto, cantidad y total
 │   │   │   └── Product.java                  # producto: nombre, precio y fechas
 │   │   ├── dto/package-info.java             # DTOs como record (vacío por ahora)
@@ -415,8 +415,9 @@ public void destroy() {
 | `@PostConstruct` | Se ejecuta una vez, cuando ya están inyectadas todas las dependencias y los `@Value`. Es el lugar para inicializar usando esos valores. |
 | `@PreDestroy` | Se ejecuta al cerrar el contexto (al detener la aplicación), antes de destruir el bean. Sirve para liberar recursos. |
 
-Al arrancar con `./mvnw -DskipTests spring-boot:run` y detener con Ctrl+C, el
-log muestra:
+Al arrancar con `./mvnw -DskipTests spring-boot:run`, llamar a
+`GET /api/invoices` y detener con Ctrl+C, el log muestra (con `@ApplicationScope`
+el objeto se crea en la primera petición, ver la sección siguiente):
 
 ```
 Constructor de Invoice: description = null
@@ -425,36 +426,64 @@ Constructor de Invoice: instancia = ...models.Invoice@739265f1 | hashCode = 1938
 @PreDestroy: el componente Invoice se va a destruir
 ```
 
-### Una sola instancia: `Invoice` es singleton
+### Alcance de aplicación: `@ApplicationScope`
 
-Además del constructor, `show()` en `InvoiceController` registra la factura que
-devuelve:
+El alcance por defecto de un bean en Spring es **singleton**: una sola
+instancia creada al arrancar (así es `Customer`). `Invoice`, en cambio, usa
+`@ApplicationScope`: una instancia por aplicación web, guardada en el
+`ServletContext`.
+
+```java
+@Component
+@ApplicationScope
+@JsonIgnoreProperties({"targetSource", "advisors", "advisorCount", "exposeProxy", "frozen",
+        "preFiltered", "proxiedInterfaces", "proxyTargetClass", "targetClass", "targetObject"})
+public class Invoice {
+```
+
+Con un scope web, Spring no inyecta el objeto real sino un **proxy**: una
+subclase generada (`Invoice$$SpringCGLIB$$0`) que, en cada llamada, busca la
+instancia del scope y le delega el método. Esto tiene tres consecuencias:
+
+- **El objeto real se crea con el primer uso**, normalmente la primera
+  petición, y no al arrancar. Por eso los logs del constructor y de
+  `@PostConstruct` aparecen recién en ese momento.
+- **Jackson serializa el proxy**, que tiene getters internos de Spring
+  (`getAdvisors()`, `getTargetSource()`, `isFrozen()`, `getTargetObject()`…).
+  Algunos tienen referencias a sí mismos y la petición falla con
+  `Direct self-reference leading to cycle`. `@JsonIgnoreProperties` le indica a
+  Jackson que ignore esas propiedades, y el JSON queda solo con `customer`,
+  `description`, `items` y `total`.
+- **`toString()` y `hashCode()` ya no coinciden en `show()`**, como se ve abajo.
+
+`show()` en `InvoiceController` registra la factura que devuelve:
 
 ```java
 @GetMapping
 public Invoice show() {
     Invoice invoice = invoiceService.getInvoice();
-    // Es singleton: la instancia y el hashCode son los mismos que en el constructor
+    // Con @ApplicationScope llega el proxy: toString() se delega al objeto real
+    // (misma instancia que en el constructor) y hashCode() es el del proxy
     log.info("show(): instancia = {} | hashCode = {}", invoice, invoice.hashCode());
     return invoice;
 }
 ```
 
-Al arrancar la aplicación y llamar dos veces a `GET /api/invoices`, el log
-muestra siempre el mismo objeto:
+Al llamar dos veces a `GET /api/invoices`, el log muestra algo así:
 
 ```
-Constructor de Invoice: instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
-show(): instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
-show(): instancia = ...models.Invoice@739265f1 | hashCode = 1938974193
+Constructor de Invoice: instancia = ...models.Invoice@21ce2e4d | hashCode = 567160397
+@PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
+show(): instancia = ...models.Invoice@21ce2e4d | hashCode = -462111985
+show(): instancia = ...models.Invoice@21ce2e4d | hashCode = -462111985
 ```
 
-- El alcance por defecto de un bean en Spring es **singleton**: se crea una
-  sola vez al arrancar y la misma instancia se comparte en toda la aplicación.
-- `Invoice@739265f1` es el `toString()` por defecto de Java: nombre de la clase
-  y `hashCode` en hexadecimal (`739265f1` = `1938974193` en decimal).
-- El valor exacto del `hashCode` cambia en cada ejecución, pero dentro de una
-  misma ejecución se repite.
+- `Invoice@21ce2e4d` es el `toString()` por defecto de Java (clase y `hashCode`
+  en hexadecimal). El proxy lo delega al objeto real, por eso coincide con el
+  del constructor: **siempre es la misma instancia**.
+- `hashCode()` en cambio lo responde el proxy, por eso es otro número. Entre
+  peticiones se mantiene igual.
+- Los valores exactos cambian en cada ejecución.
 
 ## Uso
 

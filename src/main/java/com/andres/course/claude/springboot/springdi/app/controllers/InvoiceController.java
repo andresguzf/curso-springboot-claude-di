@@ -18,14 +18,14 @@ public class InvoiceController {
     private final InvoiceService invoiceService;
 
     public InvoiceController(InvoiceService invoiceService) {
-        this.invoiceService = invoiceService;
-        
+        this.invoiceService = invoiceService;  
     }
 
     @GetMapping
     public Invoice show() {
         Invoice invoice = invoiceService.getInvoice();
-        // Es singleton: la instancia y el hashCode son los mismos que en el constructor
+        // Con @ApplicationScope llega el proxy: toString() se delega al objeto real
+        // (misma instancia que en el constructor) y hashCode() es el del proxy
         log.info("show(): instancia = {} | hashCode = {}", invoice, invoice.hashCode());
         return invoice;
     }

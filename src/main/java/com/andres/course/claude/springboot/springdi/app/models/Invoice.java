@@ -2,17 +2,26 @@ package com.andres.course.claude.springboot.springdi.app.models;
 
 import com.andres.course.claude.springboot.springdi.app.config.InvoiceItemsSource;
 import com.andres.course.claude.springboot.springdi.app.config.InvoiceItemsSource.Source;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.annotation.ApplicationScope;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @Component
+@ApplicationScope
+// Con @ApplicationScope Spring inyecta un proxy CGLIB (Invoice$$SpringCGLIB$$0).
+// Jackson intenta serializar también las propiedades internas del proxy:
+// advisors y targetSource tienen referencias cíclicas (error al serializar) y
+// el resto (advisorCount, frozen, targetObject...) ensucia el JSON. Se ignoran todas.
+@JsonIgnoreProperties({"targetSource", "advisors", "advisorCount", "exposeProxy", "frozen",
+        "preFiltered", "proxiedInterfaces", "proxyTargetClass", "targetClass", "targetObject"})
 public class Invoice {
 
     private static final Logger log = LoggerFactory.getLogger(Invoice.class);

@@ -29,7 +29,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
-│   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@InvoiceItemsSource) por constructor; getTotal(); @PostConstruct / @PreDestroy
+│   │   ├── Invoice.java                # @Component @ApplicationScope (proxy CGLIB) + @JsonIgnoreProperties; Customer e items por constructor; getTotal(); @PostConstruct / @PreDestroy
 │   │   ├── InvoiceItem.java            # POJO: product, quantity; getTotal() = precio × cantidad
 │   │   └── Product.java                # POJO: name, price (BigDecimal), createdAt, updatedAt
 │   ├── dto/                            # vacío (package-info.java)
@@ -58,7 +58,7 @@ empieza con número. No la renombres.
 
 El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 
-- `Customer` e `Invoice` son **beans `@Component`** (singleton), no entidades de
+- `Customer` e `Invoice` son **beans `@Component`**, no entidades de
   datos. Sus valores vienen de `application.properties` (`customer.name`,
   `customer.lastname`, `invoice.description`) mediante `@Value`.
 - `Product` e `InvoiceItem` son **POJOs** (no beans): hay varias instancias por
@@ -97,10 +97,23 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   resumen corto (descripción, cantidad de items y total); `destroy()` con
   `@PreDestroy` solo avisa que el componente se va a destruir. Los logs usan
   SLF4J. Mantén esos mensajes cortos.
-- Demostración de singleton: el constructor de `Invoice` y `show()` de
-  `InvoiceController` registran la instancia (`toString()` por defecto,
-  `Clase@hashCode` en hexadecimal) y su `hashCode()`. Siempre es la misma
-  instancia. No sobrescribas `toString()` en `Invoice`: ocultaría esa información.
+- `Customer` es singleton (alcance por defecto). `Invoice` tiene
+  `@ApplicationScope`: una instancia por aplicación web, y Spring inyecta un
+  **proxy CGLIB** (`Invoice$$SpringCGLIB$$0`) que delega en el objeto real. El
+  objeto real se crea con el primer uso (normalmente la primera petición), no
+  al arrancar, así que los logs del constructor y de `@PostConstruct` aparecen
+  ahí.
+- Como el controller devuelve el proxy, `Invoice` lleva
+  `@JsonIgnoreProperties({"targetSource", "advisors", "advisorCount",
+  "exposeProxy", "frozen", "preFiltered", "proxiedInterfaces",
+  "proxyTargetClass", "targetClass", "targetObject"})`: sin eso Jackson
+  serializa los getters internos del proxy y falla por referencia cíclica.
+  Si cambias el scope o la forma de devolver la factura, revisa esa lista.
+- El constructor de `Invoice` y `show()` de `InvoiceController` registran la
+  instancia (`toString()` por defecto, `Clase@hashCode` en hexadecimal) y su
+  `hashCode()`. Con el proxy, `toString()` se delega al objeto real (coincide
+  con el del constructor) pero `hashCode()` es el del proxy (no coincide). No
+  sobrescribas `toString()` en `Invoice`: ocultaría esa información.
 - Cadena de inyección: `Customer` + `List<InvoiceItem>` → `Invoice` →
   `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
   interfaz `InvoiceService`.
