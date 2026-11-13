@@ -25,10 +25,11 @@ import java.util.List;
 @Configuration
 public class AppConfig {
 
-    // Los beans con @ApplicationScope se guardan en el ServletContext y sus
-    // @PreDestroy los ejecuta ServletContextScope al cerrarse el ServletContext.
+    // Necesario solo para beans @ApplicationScope: se guardan en el ServletContext y
+    // sus @PreDestroy los ejecuta ServletContextScope al cerrarse el ServletContext.
     // Spring Boot (Tomcat embebido) no registra por defecto el listener que lo
     // dispara: ContextCleanupListener lo hace al detener la aplicación.
+    // Con @RequestScope no hace falta: el @PreDestroy se ejecuta al terminar cada petición.
     @Bean
     public ContextCleanupListener contextCleanupListener() {
         return new ContextCleanupListener();

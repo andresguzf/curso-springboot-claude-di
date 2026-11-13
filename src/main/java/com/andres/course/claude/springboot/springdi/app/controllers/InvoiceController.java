@@ -24,10 +24,10 @@ public class InvoiceController {
     @GetMapping
     public Invoice show() {
         Invoice invoice = invoiceService.getInvoice();
-        // Con @ApplicationScope llega el proxy: toString() se delega al objeto real
-        // (misma instancia que en el constructor) y hashCode() es el del proxy
-        // toString() se llama aquí, antes de log.info: con @ApplicationScope la primera
-        // llamada crea el objeto real, y si ocurriera dentro de log.info, Logback
+        // Con @RequestScope llega el proxy: toString() se delega al objeto real de esta
+        // petición (cambia en cada petición) y hashCode() es el del proxy (no cambia)
+        // toString() se llama aquí, antes de log.info: en cada petición esa llamada
+        // crea el objeto real, y si ocurriera dentro de log.info, Logback
         // descartaría los logs del constructor y de @PostConstruct (logs anidados)
         String instance = invoice.toString();
         log.info("show(): instancia = {} | hashCode = {}", instance, invoice.hashCode());

@@ -29,7 +29,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
-│   │   ├── Invoice.java                # @Component @ApplicationScope (proxy CGLIB) + @JsonIgnoreProperties; Customer e items por constructor; getTotal(); @PostConstruct / @PreDestroy
+│   │   ├── Invoice.java                # @Component @RequestScope (proxy CGLIB) + @JsonIgnoreProperties; Customer e items por constructor; getTotal(); @PostConstruct / @PreDestroy
 │   │   ├── InvoiceItem.java            # POJO: product, quantity; getTotal() = precio × cantidad
 │   │   └── Product.java                # POJO: name, price (BigDecimal), createdAt, updatedAt
 │   ├── dto/                            # vacío (package-info.java)
@@ -98,19 +98,19 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   `@PreDestroy` solo avisa que el componente se va a destruir. Los logs usan
   SLF4J. Mantén esos mensajes cortos.
 - `Customer` es singleton (alcance por defecto). `Invoice` tiene
-  `@ApplicationScope`: una instancia por aplicación web, y Spring inyecta un
-  **proxy CGLIB** (`Invoice$$SpringCGLIB$$0`) que delega en el objeto real. El
-  objeto real se crea con el primer uso (normalmente la primera petición), no
-  al arrancar, así que los logs del constructor y de `@PostConstruct` aparecen
-  ahí.
+  `@RequestScope`: una instancia nueva por cada petición HTTP, que se destruye
+  al terminarla. Spring inyecta un **proxy CGLIB** (`Invoice$$SpringCGLIB$$0`)
+  que delega en la instancia de la petición en curso. En cada petición se
+  ejecutan el constructor, `@PostConstruct` y, al final, `@PreDestroy`; al
+  arrancar la aplicación no aparece ningún log de `Invoice`.
 - En `show()`, `invoice.toString()` se llama **antes** de `log.info` (variable
   `instance`). Si el objeto real se creara dentro de `log.info` (al formatear
   el proxy), Logback descartaría los logs anidados del constructor y de
   `@PostConstruct`. No pases el proxy directamente como argumento del log.
-- `@PreDestroy` de un bean `@ApplicationScope` lo ejecuta `ServletContextScope`
-  al cerrarse el `ServletContext`. Spring Boot con Tomcat embebido no registra
-  el listener que lo dispara, por eso `AppConfig` declara un `@Bean`
-  `ContextCleanupListener`. No lo quites: sin él `@PreDestroy` no se ejecuta.
+- `AppConfig` declara un `@Bean` `ContextCleanupListener`. Solo hace falta con
+  `@ApplicationScope` (Spring Boot no registra el listener que ejecuta el
+  `@PreDestroy` de esos beans al cerrar el `ServletContext`); con `@RequestScope`
+  no se usa, pero se mantiene por si se vuelve a ese scope. No lo quites.
 - Como el controller devuelve el proxy, `Invoice` lleva
   `@JsonIgnoreProperties({"targetSource", "advisors", "advisorCount",
   "exposeProxy", "frozen", "preFiltered", "proxiedInterfaces",
@@ -119,9 +119,10 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   Si cambias el scope o la forma de devolver la factura, revisa esa lista.
 - El constructor de `Invoice` y `show()` de `InvoiceController` registran la
   instancia (`toString()` por defecto, `Clase@hashCode` en hexadecimal) y su
-  `hashCode()`. Con el proxy, `toString()` se delega al objeto real (coincide
-  con el del constructor) pero `hashCode()` es el del proxy (no coincide). No
-  sobrescribas `toString()` en `Invoice`: ocultaría esa información.
+  `hashCode()`. Con el proxy, `toString()` se delega al objeto real de la
+  petición (coincide con el del constructor y cambia en cada petición) pero
+  `hashCode()` es el del proxy (no coincide y es igual en todas las
+  peticiones). No sobrescribas `toString()` en `Invoice`: ocultaría esa información.
 - Cadena de inyección: `Customer` + `List<InvoiceItem>` → `Invoice` →
   `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
   interfaz `InvoiceService`.

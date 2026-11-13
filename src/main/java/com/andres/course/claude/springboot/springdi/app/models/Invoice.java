@@ -9,14 +9,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.context.annotation.ApplicationScope;
+import org.springframework.web.context.annotation.RequestScope;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @Component
-@ApplicationScope
-// Con @ApplicationScope Spring inyecta un proxy CGLIB (Invoice$$SpringCGLIB$$0).
+@RequestScope
+// @RequestScope: se crea una instancia nueva en cada petición HTTP y se destruye
+// al terminarla. Como es un scope web, Spring inyecta un proxy CGLIB
+// (Invoice$$SpringCGLIB$$0) que en cada petición delega en la instancia de esa petición.
 // Jackson intenta serializar también las propiedades internas del proxy:
 // advisors y targetSource tienen referencias cíclicas (error al serializar) y
 // el resto (advisorCount, frozen, targetObject...) ensucia el JSON. Se ignoran todas.
@@ -44,15 +46,16 @@ public class Invoice {
         log.info("Constructor de Invoice: instancia = {} | hashCode = {}", this, this.hashCode());
     }
 
-    // Ciclo de vida: se ejecuta una vez, después del constructor y de inyectar
-    // todas las dependencias (incluidos los @Value). Ya se puede usar todo.
+    // Ciclo de vida: se ejecuta después del constructor y de inyectar todas las
+    // dependencias (incluidos los @Value). Ya se puede usar todo.
+    // Con @RequestScope se ejecuta en cada petición, una vez por instancia.
     @PostConstruct
     public void init() {
         log.info("@PostConstruct: factura '{}' | items: {} | total: {}", description, items.size(), getTotal());
     }
 
-    // Ciclo de vida: se ejecuta cuando el contexto de Spring se cierra
-    // (al detener la aplicación), antes de destruir el bean. Sirve para liberar recursos.
+    // Ciclo de vida: se ejecuta antes de destruir el bean. Sirve para liberar recursos.
+    // Con @RequestScope se ejecuta al terminar cada petición.
     @PreDestroy
     public void destroy() {
         log.info("@PreDestroy: el componente Invoice se va a destruir");
