@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.Resource;
+import jakarta.servlet.http.HttpSessionEvent;
+import jakarta.servlet.http.HttpSessionListener;
 import org.springframework.web.context.ContextCleanupListener;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -19,6 +21,7 @@ import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -29,10 +32,23 @@ public class AppConfig {
     // sus @PreDestroy los ejecuta ServletContextScope al cerrarse el ServletContext.
     // Spring Boot (Tomcat embebido) no registra por defecto el listener que lo
     // dispara: ContextCleanupListener lo hace al detener la aplicación.
-    // Con @RequestScope no hace falta: el @PreDestroy se ejecuta al terminar cada petición.
+    // Con @RequestScope o @SessionScope no hace falta: Spring ejecuta el @PreDestroy
+    // al terminar la petición o la sesión.
     @Bean
     public ContextCleanupListener contextCleanupListener() {
         return new ContextCleanupListener();
+    }
+
+    // Aplica a cada sesión nueva el tiempo de expiración por inactividad en segundos
+    // (app.session.timeout). Spring Boot registra automáticamente este listener.
+    @Bean
+    public HttpSessionListener sessionTimeoutListener(@Value("${app.session.timeout}") Duration timeout) {
+        return new HttpSessionListener() {
+            @Override
+            public void sessionCreated(HttpSessionEvent event) {
+                event.getSession().setMaxInactiveInterval((int) timeout.toSeconds());
+            }
+        };
     }
 
     // Items de una compra de componentes de PC

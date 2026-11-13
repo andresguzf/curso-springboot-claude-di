@@ -9,16 +9,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.context.annotation.RequestScope;
+import org.springframework.web.context.annotation.SessionScope;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @Component
-@RequestScope
-// @RequestScope: se crea una instancia nueva en cada petición HTTP y se destruye
-// al terminarla. Como es un scope web, Spring inyecta un proxy CGLIB
-// (Invoice$$SpringCGLIB$$0) que en cada petición delega en la instancia de esa petición.
+@SessionScope
+// @SessionScope: se crea una instancia por sesión HTTP (cookie JSESSIONID). Todas las
+// peticiones de un mismo navegador comparten la factura; otro navegador tiene la suya.
+// Se destruye cuando la sesión termina (expira, se invalida o se detiene la aplicación).
+// Como es un scope web, Spring inyecta un proxy CGLIB (Invoice$$SpringCGLIB$$0)
+// que en cada petición delega en la instancia de la sesión en curso.
 // Jackson intenta serializar también las propiedades internas del proxy:
 // advisors y targetSource tienen referencias cíclicas (error al serializar) y
 // el resto (advisorCount, frozen, targetObject...) ensucia el JSON. Se ignoran todas.
@@ -48,14 +50,15 @@ public class Invoice {
 
     // Ciclo de vida: se ejecuta después del constructor y de inyectar todas las
     // dependencias (incluidos los @Value). Ya se puede usar todo.
-    // Con @RequestScope se ejecuta en cada petición, una vez por instancia.
+    // Con @SessionScope se ejecuta una vez por sesión, en su primera petición.
     @PostConstruct
     public void init() {
         log.info("@PostConstruct: factura '{}' | items: {} | total: {}", description, items.size(), getTotal());
     }
 
     // Ciclo de vida: se ejecuta antes de destruir el bean. Sirve para liberar recursos.
-    // Con @RequestScope se ejecuta al terminar cada petición.
+    // Con @SessionScope se ejecuta cuando termina la sesión (expira, se invalida
+    // o se detiene la aplicación) o cuando se cierra la factura con POST /api/invoices/close.
     @PreDestroy
     public void destroy() {
         log.info("@PreDestroy: el componente Invoice se va a destruir");

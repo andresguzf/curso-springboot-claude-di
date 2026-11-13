@@ -18,7 +18,7 @@ todo el curso.
 - [Estructura del proyecto Spring Boot](#estructura-del-proyecto-spring-boot)
 - [Ejemplo de inyección de dependencias](#ejemplo-de-inyección-de-dependencias)
 - [Ciclo de vida del componente Invoice](#ciclo-de-vida-del-componente-invoice)
-- [Alcance por petición: @RequestScope](#alcance-por-petición-requestscope)
+- [Alcance por sesión: @SessionScope](#alcance-por-sesión-sessionscope)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -97,7 +97,7 @@ src/
 │   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
-│   │   │   ├── Invoice.java                  # componente @RequestScope: descripción + Customer e items + total + ciclo de vida
+│   │   │   ├── Invoice.java                  # componente @SessionScope: descripción + Customer e items + total + ciclo de vida
 │   │   │   ├── InvoiceItem.java              # item: producto, cantidad y total
 │   │   │   └── Product.java                  # producto: nombre, precio y fechas
 │   │   ├── dto/package-info.java             # DTOs como record (vacío por ahora)
@@ -107,12 +107,12 @@ src/
 │   │   │   ├── InvoiceService.java           # contrato del service
 │   │   │   └── InvoiceServiceImpl.java       # implementación (@Service)
 │   │   ├── controllers/
-│   │   │   └── InvoiceController.java        # GET /api/invoices (registra instancia y hashCode)
+│   │   │   └── InvoiceController.java        # GET /api/invoices y POST /api/invoices/close
 │   │   └── exceptions/
 │   │       ├── ResourceNotFoundException.java
 │   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
 │   └── resources/
-│       ├── application.properties            # Swagger UI, Actuator, ProblemDetail y datos de ejemplo
+│       ├── application.properties            # Swagger UI, Actuator, ProblemDetail, sesiones y datos de ejemplo
 │       └── data/
 │           ├── invoice-items.json            # 8 items de la factura en formato JSON
 │           └── invoice-items.csv             # 10 items de la factura en formato CSV
@@ -413,44 +413,49 @@ public void destroy() {
 |---|---|
 | Constructor | Spring crea el bean e inyecta las dependencias del constructor. Los campos con `@Value` todavía no tienen valor. |
 | `@PostConstruct` | Se ejecuta una vez por instancia, cuando ya están inyectadas todas las dependencias y los `@Value`. Es el lugar para inicializar usando esos valores. |
-| `@PreDestroy` | Se ejecuta antes de destruir el bean. Sirve para liberar recursos. Con un singleton es al detener la aplicación; con `@RequestScope`, al terminar cada petición. |
+| `@PreDestroy` | Se ejecuta antes de destruir el bean. Sirve para liberar recursos. Con un singleton es al detener la aplicación; con `@SessionScope`, cuando termina la sesión. |
 
-Como `Invoice` es `@RequestScope` (ver la sección siguiente), al arrancar con
-`./mvnw -DskipTests spring-boot:run` no aparece ningún log de `Invoice`. Cada
-llamada a `GET /api/invoices` muestra el ciclo completo:
+Como `Invoice` es `@SessionScope` (ver la sección siguiente), al arrancar con
+`./mvnw -DskipTests spring-boot:run` no aparece ningún log de `Invoice`. La
+primera llamada a `GET /api/invoices` desde un navegador crea la factura de esa
+sesión, y al detener la aplicación con Ctrl+C se destruye:
 
 ```
 Constructor de Invoice: description = null
-Constructor de Invoice: instancia = ...models.Invoice@19920d47 | hashCode = 429002055
+Constructor de Invoice: instancia = ...models.Invoice@2e8f41f2 | hashCode = 781140466
 @PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
-show(): instancia = ...models.Invoice@19920d47 | hashCode = -534502517
+show(): instancia = ...models.Invoice@2e8f41f2 | hashCode = -534502517
 @PreDestroy: el componente Invoice se va a destruir
 ```
 
-### Alcance por petición: `@RequestScope`
+### Alcance por sesión: `@SessionScope`
 
 El alcance por defecto de un bean en Spring es **singleton**: una sola
 instancia creada al arrancar (así es `Customer`). `Invoice`, en cambio, usa
-`@RequestScope`: **una instancia nueva por cada petición HTTP**, que se
-destruye cuando la petición termina.
+`@SessionScope`: **una instancia por sesión HTTP**. Tomcat identifica la sesión
+con la cookie `JSESSIONID`, así que todas las peticiones de un mismo navegador
+comparten la misma factura, y otro navegador (o una ventana de incógnito) tiene
+la suya.
 
 ```java
 @Component
-@RequestScope
+@SessionScope
 @JsonIgnoreProperties({"targetSource", "advisors", "advisorCount", "exposeProxy", "frozen",
         "preFiltered", "proxiedInterfaces", "proxyTargetClass", "targetClass", "targetObject"})
 public class Invoice {
 ```
 
 `InvoiceServiceImpl` es singleton y recibe `Invoice` una sola vez al arrancar,
-cuando todavía no hay ninguna petición. Por eso Spring no inyecta el objeto
-real sino un **proxy**: una subclase generada (`Invoice$$SpringCGLIB$$0`) que,
-en cada llamada, busca la instancia de la petición en curso y le delega el
-método. Esto tiene tres consecuencias:
+cuando todavía no hay ninguna sesión. Por eso Spring no inyecta el objeto real
+sino un **proxy**: una subclase generada (`Invoice$$SpringCGLIB$$0`) que, en
+cada llamada, busca la instancia de la sesión en curso y le delega el método.
+Esto tiene tres consecuencias:
 
-- **El ciclo de vida completo ocurre en cada petición**: constructor,
-  `@PostConstruct` al crear la instancia y `@PreDestroy` al terminar la
-  petición. Al arrancar la aplicación no aparece ningún log de `Invoice`.
+- **El ciclo de vida sigue a la sesión**: el constructor y `@PostConstruct` se
+  ejecutan en la primera petición de cada sesión, y `@PreDestroy` cuando la
+  sesión termina: expira (en este proyecto, 30 segundos sin actividad), se
+  invalida o se detiene la aplicación; o cuando se cierra solo la factura con
+  `POST /api/invoices/close`. Al arrancar no aparece ningún log de `Invoice`.
 - **Jackson serializa el proxy**, que tiene getters internos de Spring
   (`getAdvisors()`, `getTargetSource()`, `isFrozen()`, `getTargetObject()`…).
   Algunos tienen referencias a sí mismos y la petición falla con
@@ -465,10 +470,11 @@ método. Esto tiene tres consecuencias:
 @GetMapping
 public Invoice show() {
     Invoice invoice = invoiceService.getInvoice();
-    // Con @RequestScope llega el proxy: toString() se delega al objeto real de esta
-    // petición (cambia en cada petición) y hashCode() es el del proxy (no cambia)
-    // toString() se llama aquí, antes de log.info: en cada petición esa llamada
-    // crea el objeto real, y si ocurriera dentro de log.info, Logback
+    // Con @SessionScope llega el proxy: toString() se delega al objeto real de la
+    // sesión (igual en toda la sesión, distinto en otra) y hashCode() es el del
+    // proxy (siempre igual)
+    // toString() se llama aquí, antes de log.info: en la primera petición de cada
+    // sesión esa llamada crea el objeto real, y si ocurriera dentro de log.info, Logback
     // descartaría los logs del constructor y de @PostConstruct (logs anidados)
     String instance = invoice.toString();
     log.info("show(): instancia = {} | hashCode = {}", instance, invoice.hashCode());
@@ -476,33 +482,150 @@ public Invoice show() {
 }
 ```
 
-`toString()` se llama antes de `log.info` a propósito. En cada petición, esa
-llamada es la que crea el objeto real (constructor y `@PostConstruct`). Si se
-pasara el proxy directo a `log.info`, Logback llamaría a `toString()` mientras
-escribe el mensaje, y descarta los logs que se generan en ese momento: los del
-constructor y de `@PostConstruct` no aparecerían.
+`toString()` se llama antes de `log.info` a propósito. En la primera petición
+de cada sesión, esa llamada es la que crea el objeto real (constructor y
+`@PostConstruct`). Si se pasara el proxy directo a `log.info`, Logback llamaría
+a `toString()` mientras escribe el mensaje, y descarta los logs que se generan
+en ese momento: los del constructor y de `@PostConstruct` no aparecerían.
 
-Al llamar dos veces a `GET /api/invoices`, el log muestra algo así:
+Con dos peticiones desde un navegador (A), una desde otro (B) y luego Ctrl+C,
+el log muestra algo así:
 
 ```
--- petición 1 --
-Constructor de Invoice: instancia = ...models.Invoice@19920d47 | hashCode = 429002055
+-- navegador A, petición 1 (crea la sesión y su factura) --
+Constructor de Invoice: instancia = ...models.Invoice@2e8f41f2 | hashCode = 781140466
 @PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
-show(): instancia = ...models.Invoice@19920d47 | hashCode = -534502517
+show(): instancia = ...models.Invoice@2e8f41f2 | hashCode = -534502517
+-- navegador A, petición 2 (misma sesión, misma factura) --
+show(): instancia = ...models.Invoice@2e8f41f2 | hashCode = -534502517
+-- navegador B, petición 1 (otra sesión, otra factura) --
+Constructor de Invoice: instancia = ...models.Invoice@238f2c25 | hashCode = 596585509
+@PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
+show(): instancia = ...models.Invoice@238f2c25 | hashCode = -534502517
+-- Ctrl+C: terminan las dos sesiones --
 @PreDestroy: el componente Invoice se va a destruir
--- petición 2 --
-Constructor de Invoice: instancia = ...models.Invoice@e25b06 | hashCode = 14834438
-@PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
-show(): instancia = ...models.Invoice@e25b06 | hashCode = -534502517
 @PreDestroy: el componente Invoice se va a destruir
 ```
 
-- `Invoice@19920d47` es el `toString()` por defecto de Java (clase y `hashCode`
+- `Invoice@2e8f41f2` es el `toString()` por defecto de Java (clase y `hashCode`
   en hexadecimal). El proxy lo delega al objeto real, por eso coincide con el
-  del constructor y **cambia en cada petición**: son instancias distintas.
+  del constructor: **se repite dentro de la misma sesión y cambia entre
+  sesiones**.
 - `hashCode()` en cambio lo responde el proxy, por eso es otro número y es
   **igual en todas las peticiones**: el proxy es uno solo.
+- Para probarlo con dos sesiones, abre `/api/invoices` en una ventana normal y
+  en una de incógnito.
 - Los valores exactos cambian en cada ejecución.
+
+#### Cerrar solo la factura: `POST /api/invoices/close`
+
+Para ver `@PreDestroy` sin detener el servidor, `InvoiceController` expone un
+endpoint que cierra la factura de la sesión actual. **No invalida la sesión**,
+porque en una aplicación real la sesión puede guardar otros datos (usuario,
+carrito, preferencias): quita solo la factura.
+
+```java
+// InvoiceController
+@PostMapping("/close")
+public ResponseEntity<Void> close() {
+    log.info("close(): cerrando la factura de la sesión");
+    invoiceService.closeInvoice();
+    return ResponseEntity.noContent().build();
+}
+```
+
+```java
+// InvoiceServiceImpl
+@Override
+public void closeInvoice() {
+    RequestAttributes attributes = RequestContextHolder.currentRequestAttributes();
+    attributes.removeAttribute(ScopedProxyUtils.getTargetBeanName("invoice"), RequestAttributes.SCOPE_SESSION);
+}
+```
+
+- Un bean `@SessionScope` se guarda en la sesión como un atributo más, con el
+  nombre `scopedTarget.invoice` (`ScopedProxyUtils.getTargetBeanName("invoice")`).
+  `removeAttribute(..., SCOPE_SESSION)` quita solo ese atributo, y Spring
+  ejecuta el `@PreDestroy` de la factura en el momento.
+- La sesión sigue viva: la siguiente petición con la misma cookie usa la misma
+  sesión y crea una factura nueva.
+- Si no hay sesión (petición sin cookie), no hace nada y no crea una sesión.
+- Es `POST` porque cambia el estado del servidor; responde `204 No Content`.
+- Se descartó `ScopedObject.removeFromScope()` del proxy: ejecuta el
+  `@PreDestroy` dos veces y, si no hay sesión, crea una solo para borrarla.
+
+Para probarlo con `curl` (el archivo `cookies.txt` guarda la cookie de sesión,
+como haría un navegador o Postman):
+
+```bash
+curl -b cookies.txt -c cookies.txt http://localhost:8080/api/invoices
+```
+
+```bash
+curl -X POST -b cookies.txt -c cookies.txt http://localhost:8080/api/invoices/close
+```
+
+```bash
+curl -b cookies.txt -c cookies.txt http://localhost:8080/api/invoices
+```
+
+El log muestra (la tercera petición usa la misma sesión, sin una cookie nueva):
+
+```
+Constructor de Invoice: instancia = ...models.Invoice@12967f14 | hashCode = 311852820
+show(): instancia = ...models.Invoice@12967f14 | hashCode = -2009169786
+close(): cerrando la factura de la sesión
+@PreDestroy: el componente Invoice se va a destruir
+Constructor de Invoice: instancia = ...models.Invoice@6324b5de | hashCode = 1663350238
+show(): instancia = ...models.Invoice@6324b5de | hashCode = -2009169786
+```
+
+#### Configuración de sesiones para la demo
+
+`application.properties` ajusta tres cosas de las sesiones:
+
+```properties
+server.servlet.session.persistent=false
+app.session.timeout=30s
+server.tomcat.background-processor-delay=5s
+```
+
+**`server.servlet.session.persistent=false`**: devtools activa por defecto la
+persistencia de sesiones para no perderlas en cada recarga. Al detener la
+aplicación, Tomcat guarda las sesiones en disco en lugar de cerrarlas, y así el
+`@PreDestroy` no aparece con Ctrl+C. Desactivada, al detener se cierran todas
+las sesiones y se ejecuta el `@PreDestroy` de cada factura. A cambio, con
+devtools cada recarga empieza con sesiones nuevas.
+
+**`app.session.timeout=30s`**: la sesión expira tras 30 segundos sin
+peticiones, en vez de los 30 minutos por defecto. No se usa
+`server.servlet.session.timeout` porque Spring Boot lo redondea a minutos en
+Tomcat (mínimo 1 minuto). En su lugar, `AppConfig` registra un
+`HttpSessionListener` que aplica el valor en segundos a cada sesión nueva:
+
+```java
+@Bean
+public HttpSessionListener sessionTimeoutListener(@Value("${app.session.timeout}") Duration timeout) {
+    return new HttpSessionListener() {
+        @Override
+        public void sessionCreated(HttpSessionEvent event) {
+            event.getSession().setMaxInactiveInterval((int) timeout.toSeconds());
+        }
+    };
+}
+```
+
+**`server.tomcat.background-processor-delay=5s`**: Tomcat no detecta una
+sesión vencida al instante, sino en una tarea en segundo plano que revisa las
+sesiones cada 6 ejecuciones de su proceso de fondo. Con 5 s, revisa cada 30 s
+(por defecto, cada 60 s). Así, el `@PreDestroy` aparece **entre 30 y 60
+segundos** después de la última petición.
+
+> Borrar la cookie `JSESSIONID` en Postman o en el navegador **no** cierra la
+> sesión: la cookie es solo el identificador que guarda el cliente. La sesión
+> sigue viva en el servidor hasta que expira. Con esta configuración, después
+> de borrar la cookie el `@PreDestroy` de esa factura aparece entre 30 y 60
+> segundos más tarde. Para cerrarla en el momento, usa `POST /api/invoices/close`.
 
 #### `ContextCleanupListener` (solo para `@ApplicationScope`)
 
@@ -515,8 +638,8 @@ public ContextCleanupListener contextCleanupListener() {
 }
 ```
 
-Con `@RequestScope` no se usa: Spring ejecuta el `@PreDestroy` al terminar
-cada petición. Hace falta con `@ApplicationScope`, donde el bean vive en el
+Con `@SessionScope` (o `@RequestScope`) no se usa: Spring ejecuta el
+`@PreDestroy` al terminar la sesión (o la petición). Hace falta con `@ApplicationScope`, donde el bean vive en el
 `ServletContext` y su `@PreDestroy` se ejecuta al cerrarlo; Spring Boot con
 Tomcat embebido no registra por defecto el listener que dispara ese cierre. Se
 mantiene para poder volver a ese scope sin perder el `@PreDestroy`.
@@ -682,6 +805,7 @@ aplicación o de ejecutar los tests.
 | http://localhost:8080/actuator/health | Estado de la aplicación |
 | http://localhost:8080/actuator/info | Información de la aplicación |
 | http://localhost:8080/api/invoices | Factura de ejemplo con su cliente e items |
+| `POST` http://localhost:8080/api/invoices/close | Cierra solo la factura de la sesión actual (ejecuta su `@PreDestroy`) |
 
 ## Pruebas de la skill
 

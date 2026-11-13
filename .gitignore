@@ -35,6 +35,8 @@ application-secret*.properties
 *.keystore
 *.truststore
 credentials.json
+# Cookies de sesión guardadas por curl (-c cookies.txt)
+cookies.txt
 secrets/
 
 # ============================================================

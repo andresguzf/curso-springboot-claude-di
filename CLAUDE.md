@@ -25,25 +25,25 @@ Initializr mediante la skill `spring-boot-best-practices`.
 ├── src/main/java/com/andres/course/claude/springboot/springdi/app/
 │   ├── Application.java                # @SpringBootApplication
 │   ├── config/
-│   │   ├── AppConfig.java              # @Configuration: @Bean ContextCleanupListener + itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
+│   │   ├── AppConfig.java              # @Configuration: @Bean ContextCleanupListener, sessionTimeoutListener + itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
 │   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
-│   │   ├── Invoice.java                # @Component @RequestScope (proxy CGLIB) + @JsonIgnoreProperties; Customer e items por constructor; getTotal(); @PostConstruct / @PreDestroy
+│   │   ├── Invoice.java                # @Component @SessionScope (proxy CGLIB) + @JsonIgnoreProperties; Customer e items por constructor; getTotal(); @PostConstruct / @PreDestroy
 │   │   ├── InvoiceItem.java            # POJO: product, quantity; getTotal() = precio × cantidad
 │   │   └── Product.java                # POJO: name, price (BigDecimal), createdAt, updatedAt
 │   ├── dto/                            # vacío (package-info.java)
 │   ├── mappers/                        # vacío (package-info.java)
 │   ├── repositories/                   # vacío (package-info.java)
 │   ├── services/
-│   │   ├── InvoiceService.java         # contrato: Invoice getInvoice()
-│   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor
+│   │   ├── InvoiceService.java         # contrato: Invoice getInvoice(), void closeInvoice()
+│   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor; closeInvoice() quita la factura de la sesión
 │   ├── controllers/
-│   │   └── InvoiceController.java      # GET /api/invoices, recibe InvoiceService por constructor; registra instancia y hashCode
+│   │   └── InvoiceController.java      # GET /api/invoices (registra instancia y hashCode) y POST /api/invoices/close (cierra solo la factura)
 │   └── exceptions/
 │       ├── ResourceNotFoundException.java
 │       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail (404, 400)
-├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo
+├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo, sesiones (persistent=false, app.session.timeout=30s, background-processor-delay=5s)
 ├── src/main/resources/data/invoice-items.json  # 8 items de supermercado que lee el bean itemsJson
 ├── src/main/resources/data/invoice-items.csv   # 10 items de supermercado que lee el bean itemsCsv
 ├── src/test/java/.../springdi/app/ApplicationTests.java
@@ -98,11 +98,35 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   `@PreDestroy` solo avisa que el componente se va a destruir. Los logs usan
   SLF4J. Mantén esos mensajes cortos.
 - `Customer` es singleton (alcance por defecto). `Invoice` tiene
-  `@RequestScope`: una instancia nueva por cada petición HTTP, que se destruye
-  al terminarla. Spring inyecta un **proxy CGLIB** (`Invoice$$SpringCGLIB$$0`)
-  que delega en la instancia de la petición en curso. En cada petición se
-  ejecutan el constructor, `@PostConstruct` y, al final, `@PreDestroy`; al
-  arrancar la aplicación no aparece ningún log de `Invoice`.
+  `@SessionScope`: una instancia por sesión HTTP (cookie `JSESSIONID`). Las
+  peticiones de un mismo navegador comparten la factura y otro navegador tiene
+  la suya. Spring inyecta un **proxy CGLIB** (`Invoice$$SpringCGLIB$$0`) que
+  delega en la instancia de la sesión en curso. El constructor y
+  `@PostConstruct` se ejecutan en la primera petición de cada sesión;
+  `@PreDestroy`, cuando la sesión termina (expira, se invalida o se detiene la
+  aplicación). Al arrancar no aparece ningún log de `Invoice`.
+- `POST /api/invoices/close` llama a `InvoiceService.closeInvoice()` y responde
+  204. **No invalida la sesión** (puede tener otros datos): quita solo el
+  atributo de la factura (`ScopedProxyUtils.getTargetBeanName("invoice")` =
+  `scopedTarget.invoice`) con
+  `RequestContextHolder.currentRequestAttributes().removeAttribute(..., SCOPE_SESSION)`.
+  Spring ejecuta el `@PreDestroy` una vez, y sin sesión no crea una nueva. No
+  uses `ScopedObject.removeFromScope()`: ejecuta el `@PreDestroy` dos veces y
+  crea una sesión si no existe. No registres `session.getId()` en los logs: el
+  id de sesión es una credencial.
+- `server.servlet.session.persistent=false` en `application.properties`:
+  devtools activa por defecto la persistencia de sesiones, y entonces Tomcat
+  guarda las sesiones en disco al detener la app en vez de cerrarlas, y el
+  `@PreDestroy` de los beans `@SessionScope` no se ejecuta. No la quites.
+- Expiración por inactividad de 30 s, para la demo: `app.session.timeout=30s`
+  lo aplica el bean `sessionTimeoutListener` (`HttpSessionListener` en
+  `AppConfig`) con `setMaxInactiveInterval` en segundos, porque
+  `server.servlet.session.timeout` Spring Boot lo redondea a minutos (mínimo 1)
+  en Tomcat. `server.tomcat.background-processor-delay=5s` hace que Tomcat
+  revise las sesiones vencidas cada 30 s (6 ejecuciones): el `@PreDestroy`
+  aparece entre 30 y 60 s después de la última petición.
+- Borrar la cookie `JSESSIONID` en el cliente no cierra la sesión en el
+  servidor: sigue viva hasta que expira (con esta configuración, 30 s).
 - En `show()`, `invoice.toString()` se llama **antes** de `log.info` (variable
   `instance`). Si el objeto real se creara dentro de `log.info` (al formatear
   el proxy), Logback descartaría los logs anidados del constructor y de
@@ -110,7 +134,7 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - `AppConfig` declara un `@Bean` `ContextCleanupListener`. Solo hace falta con
   `@ApplicationScope` (Spring Boot no registra el listener que ejecuta el
   `@PreDestroy` de esos beans al cerrar el `ServletContext`); con `@RequestScope`
-  no se usa, pero se mantiene por si se vuelve a ese scope. No lo quites.
+  o `@SessionScope` no se usa, pero se mantiene por si se vuelve a ese scope. No lo quites.
 - Como el controller devuelve el proxy, `Invoice` lleva
   `@JsonIgnoreProperties({"targetSource", "advisors", "advisorCount",
   "exposeProxy", "frozen", "preFiltered", "proxiedInterfaces",
@@ -120,9 +144,9 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - El constructor de `Invoice` y `show()` de `InvoiceController` registran la
   instancia (`toString()` por defecto, `Clase@hashCode` en hexadecimal) y su
   `hashCode()`. Con el proxy, `toString()` se delega al objeto real de la
-  petición (coincide con el del constructor y cambia en cada petición) pero
-  `hashCode()` es el del proxy (no coincide y es igual en todas las
-  peticiones). No sobrescribas `toString()` en `Invoice`: ocultaría esa información.
+  sesión (coincide con el del constructor, se repite en la misma sesión y
+  cambia en otra) pero `hashCode()` es el del proxy (no coincide y es igual
+  siempre). No sobrescribas `toString()` en `Invoice`: ocultaría esa información.
 - Cadena de inyección: `Customer` + `List<InvoiceItem>` → `Invoice` →
   `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
   interfaz `InvoiceService`.
@@ -147,6 +171,7 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - Tests: `./mvnw test`
 - Swagger UI: http://localhost:8080/swagger-ui.html · Health: http://localhost:8080/actuator/health
 - Endpoint de ejemplo: http://localhost:8080/api/invoices
+- Cerrar la sesión (POST): `curl -X POST -b cookies.txt http://localhost:8080/api/invoices/close`
 
 ## Available skills
 
