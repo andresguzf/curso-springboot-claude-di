@@ -17,6 +17,7 @@ todo el curso.
 - [Estructura del repositorio](#estructura-del-repositorio)
 - [Estructura del proyecto Spring Boot](#estructura-del-proyecto-spring-boot)
 - [Ejemplo de inyección de dependencias](#ejemplo-de-inyección-de-dependencias)
+- [Ciclo de vida del componente Invoice](#ciclo-de-vida-del-componente-invoice)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -95,7 +96,7 @@ src/
 │   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
-│   │   │   ├── Invoice.java                  # componente: descripción + Customer e items inyectados + total
+│   │   │   ├── Invoice.java                  # componente: descripción + Customer e items inyectados + total + ciclo de vida
 │   │   │   ├── InvoiceItem.java              # item: producto, cantidad y total
 │   │   │   └── Product.java                  # producto: nombre, precio y fechas
 │   │   ├── dto/package-info.java             # DTOs como record (vacío por ahora)
@@ -380,6 +381,45 @@ Respuesta de `GET /api/invoices`:
 En esta etapa el service devuelve el componente `Invoice` directamente, por eso
 la respuesta incluye las fechas `createdAt`/`updatedAt` del producto. Los DTOs
 (que las ocultarán), el mapper y los repositorios se incorporarán más adelante.
+
+### Ciclo de vida del componente `Invoice`
+
+`Invoice` implementa los métodos de ciclo de vida con las anotaciones de
+`jakarta.annotation` (ya incluidas por los starters de Spring Boot):
+
+```java
+Invoice(Customer customer, @InvoiceItemsSource(Source.CSV) List<InvoiceItem> items) {
+    this.customer = customer;
+    this.items = items;
+    // Aquí description todavía es null: @Value se inyecta después del constructor
+    log.info("Constructor de Invoice: description = {}", description);
+}
+
+@PostConstruct
+public void init() {
+    log.info("@PostConstruct: factura '{}' | items: {} | total: {}", description, items.size(), getTotal());
+}
+
+@PreDestroy
+public void destroy() {
+    log.info("@PreDestroy: el componente Invoice se va a destruir");
+}
+```
+
+| Momento | Qué pasa |
+|---|---|
+| Constructor | Spring crea el bean e inyecta las dependencias del constructor. Los campos con `@Value` todavía no tienen valor. |
+| `@PostConstruct` | Se ejecuta una vez, cuando ya están inyectadas todas las dependencias y los `@Value`. Es el lugar para inicializar usando esos valores. |
+| `@PreDestroy` | Se ejecuta al cerrar el contexto (al detener la aplicación), antes de destruir el bean. Sirve para liberar recursos. |
+
+Al arrancar con `./mvnw -DskipTests spring-boot:run` y detener con Ctrl+C, el
+log muestra:
+
+```
+Constructor de Invoice: description = null
+@PostConstruct: factura 'Compras de supermercado' | items: 10 | total: 37710
+@PreDestroy: el componente Invoice se va a destruir
+```
 
 ## Uso
 

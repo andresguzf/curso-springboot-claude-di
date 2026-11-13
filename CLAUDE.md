@@ -29,7 +29,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
-│   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@InvoiceItemsSource) por constructor; getTotal()
+│   │   ├── Invoice.java                # @Component: description (@Value) + Customer e items (@InvoiceItemsSource) por constructor; getTotal(); @PostConstruct / @PreDestroy
 │   │   ├── InvoiceItem.java            # POJO: product, quantity; getTotal() = precio × cantidad
 │   │   └── Product.java                # POJO: name, price (BigDecimal), createdAt, updatedAt
 │   ├── dto/                            # vacío (package-info.java)
@@ -91,6 +91,12 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   con `reduce(BigDecimal.ZERO, BigDecimal::add)` (la alternativa con
   `mapToDouble().sum()` queda comentada en el código).
   Ambos son `BigDecimal` y Jackson los incluye en el JSON como `total`.
+- Ciclo de vida de `Invoice` (`jakarta.annotation`, ya incluida por los
+  starters): el constructor registra que `description` aún es `null` (los
+  `@Value` se inyectan después); `init()` con `@PostConstruct` registra un
+  resumen corto (descripción, cantidad de items y total); `destroy()` con
+  `@PreDestroy` solo avisa que el componente se va a destruir. Los logs usan
+  SLF4J. Mantén esos mensajes cortos.
 - Cadena de inyección: `Customer` + `List<InvoiceItem>` → `Invoice` →
   `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
   interfaz `InvoiceService`.
