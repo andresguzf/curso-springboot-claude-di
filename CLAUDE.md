@@ -25,7 +25,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 ├── src/main/java/com/andres/course/claude/springboot/springdi/app/
 │   ├── Application.java                # @SpringBootApplication
 │   ├── config/
-│   │   ├── AppConfig.java              # @Configuration: @Bean itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
+│   │   ├── AppConfig.java              # @Configuration: @Bean ContextCleanupListener + itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
 │   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
@@ -103,6 +103,14 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   objeto real se crea con el primer uso (normalmente la primera petición), no
   al arrancar, así que los logs del constructor y de `@PostConstruct` aparecen
   ahí.
+- En `show()`, `invoice.toString()` se llama **antes** de `log.info` (variable
+  `instance`). Si el objeto real se creara dentro de `log.info` (al formatear
+  el proxy), Logback descartaría los logs anidados del constructor y de
+  `@PostConstruct`. No pases el proxy directamente como argumento del log.
+- `@PreDestroy` de un bean `@ApplicationScope` lo ejecuta `ServletContextScope`
+  al cerrarse el `ServletContext`. Spring Boot con Tomcat embebido no registra
+  el listener que lo dispara, por eso `AppConfig` declara un `@Bean`
+  `ContextCleanupListener`. No lo quites: sin él `@PreDestroy` no se ejecuta.
 - Como el controller devuelve el proxy, `Invoice` lleva
   `@JsonIgnoreProperties({"targetSource", "advisors", "advisorCount",
   "exposeProxy", "frozen", "preFiltered", "proxiedInterfaces",

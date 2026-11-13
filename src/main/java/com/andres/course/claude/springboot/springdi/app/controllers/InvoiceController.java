@@ -26,7 +26,11 @@ public class InvoiceController {
         Invoice invoice = invoiceService.getInvoice();
         // Con @ApplicationScope llega el proxy: toString() se delega al objeto real
         // (misma instancia que en el constructor) y hashCode() es el del proxy
-        log.info("show(): instancia = {} | hashCode = {}", invoice, invoice.hashCode());
+        // toString() se llama aquí, antes de log.info: con @ApplicationScope la primera
+        // llamada crea el objeto real, y si ocurriera dentro de log.info, Logback
+        // descartaría los logs del constructor y de @PostConstruct (logs anidados)
+        String instance = invoice.toString();
+        log.info("show(): instancia = {} | hashCode = {}", instance, invoice.hashCode());
         return invoice;
     }
 }

@@ -93,7 +93,7 @@ src/
 │   ├── java/com/andres/course/claude/springboot/springdi/app/
 │   │   ├── Application.java                  # clase principal (@SpringBootApplication)
 │   │   ├── config/
-│   │   │   ├── AppConfig.java                # @Bean con las listas de items (PC, supermercado, JSON y CSV)
+│   │   │   ├── AppConfig.java                # @Bean ContextCleanupListener + listas de items (PC, supermercado, JSON y CSV)
 │   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
@@ -455,6 +455,7 @@ instancia del scope y le delega el método. Esto tiene tres consecuencias:
   Jackson que ignore esas propiedades, y el JSON queda solo con `customer`,
   `description`, `items` y `total`.
 - **`toString()` y `hashCode()` ya no coinciden en `show()`**, como se ve abajo.
+- **`@PreDestroy` necesita un listener extra**, explicado al final de esta sección.
 
 `show()` en `InvoiceController` registra la factura que devuelve:
 
@@ -464,10 +465,20 @@ public Invoice show() {
     Invoice invoice = invoiceService.getInvoice();
     // Con @ApplicationScope llega el proxy: toString() se delega al objeto real
     // (misma instancia que en el constructor) y hashCode() es el del proxy
-    log.info("show(): instancia = {} | hashCode = {}", invoice, invoice.hashCode());
+    // toString() se llama aquí, antes de log.info: con @ApplicationScope la primera
+    // llamada crea el objeto real, y si ocurriera dentro de log.info, Logback
+    // descartaría los logs del constructor y de @PostConstruct (logs anidados)
+    String instance = invoice.toString();
+    log.info("show(): instancia = {} | hashCode = {}", instance, invoice.hashCode());
     return invoice;
 }
 ```
+
+`toString()` se llama antes de `log.info` a propósito. En la primera petición,
+esa llamada es la que crea el objeto real (constructor y `@PostConstruct`). Si
+se pasara el proxy directo a `log.info`, Logback llamaría a `toString()`
+mientras escribe el mensaje, y descarta los logs que se generan en ese momento:
+los del constructor y de `@PostConstruct` no aparecerían.
 
 Al llamar dos veces a `GET /api/invoices`, el log muestra algo así:
 
@@ -484,6 +495,27 @@ show(): instancia = ...models.Invoice@21ce2e4d | hashCode = -462111985
 - `hashCode()` en cambio lo responde el proxy, por eso es otro número. Entre
   peticiones se mantiene igual.
 - Los valores exactos cambian en cada ejecución.
+
+#### `@PreDestroy` con `@ApplicationScope`
+
+Un bean `@ApplicationScope` vive en el `ServletContext`, y su `@PreDestroy` lo
+ejecuta `ServletContextScope` cuando el `ServletContext` se cierra. Spring Boot
+con Tomcat embebido no registra por defecto el listener que dispara ese cierre,
+así que `AppConfig` lo declara como bean:
+
+```java
+@Bean
+public ContextCleanupListener contextCleanupListener() {
+    return new ContextCleanupListener();
+}
+```
+
+Spring Boot registra automáticamente los beans que son listeners de servlet.
+Con él, al detener la aplicación (Ctrl+C) aparece:
+
+```
+@PreDestroy: el componente Invoice se va a destruir
+```
 
 ## Uso
 

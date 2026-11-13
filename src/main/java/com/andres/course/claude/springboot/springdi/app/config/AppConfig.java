@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.Resource;
+import org.springframework.web.context.ContextCleanupListener;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -23,6 +24,15 @@ import java.util.List;
 
 @Configuration
 public class AppConfig {
+
+    // Los beans con @ApplicationScope se guardan en el ServletContext y sus
+    // @PreDestroy los ejecuta ServletContextScope al cerrarse el ServletContext.
+    // Spring Boot (Tomcat embebido) no registra por defecto el listener que lo
+    // dispara: ContextCleanupListener lo hace al detener la aplicación.
+    @Bean
+    public ContextCleanupListener contextCleanupListener() {
+        return new ContextCleanupListener();
+    }
 
     // Items de una compra de componentes de PC
     @Bean
