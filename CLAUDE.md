@@ -26,7 +26,11 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   ├── Application.java                # @SpringBootApplication
 │   ├── config/
 │   │   ├── AppConfig.java              # @Configuration: @Bean ContextCleanupListener, sessionTimeoutListener + itemsOffice (3 PC), itemsSupermarket (7), itemsJson (8, JSON, @Primary) e itemsCsv (10, CSV)
-│   │   └── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
+│   │   ├── InvoiceItemsSource.java     # calificador personalizado: @InvoiceItemsSource(Source.OFFICE | SUPERMARKET | JSON | CSV)
+│   │   └── WebMvcConfig.java           # WebMvcConfigurer: registra LoadingTimeInterceptor en "/**"
+│   ├── interceptors/
+│   │   ├── LoadingTimeInterceptor.java     # HandlerInterceptor: mide el tiempo de cada request y lo registra en el log
+│   │   └── ElapsedTimeResponseAdvice.java  # ResponseBodyAdvice: agrega "elapsedMs" al JSON de los controllers
 │   ├── models/
 │   │   ├── Customer.java               # @Component: name, lastname (@Value)
 │   │   ├── Invoice.java                # @Component @SessionScope (proxy CGLIB) + @JsonIgnoreProperties; Customer e items por constructor; getTotal(); @PostConstruct / @PreDestroy
@@ -151,8 +155,27 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   `InvoiceServiceImpl` → `InvoiceController`. El controller depende de la
   interfaz `InvoiceService`.
 - `GET /api/invoices` devuelve el bean `Invoice` serializado a JSON, con
-  cliente, descripción, items con su total y el total de la factura (incluye
-  `createdAt`/`updatedAt` del producto porque aún no hay DTOs).
+  cliente, descripción, items con su total, el total de la factura y
+  `elapsedMs` (incluye `createdAt`/`updatedAt` del producto porque aún no hay DTOs).
+
+### Interceptor de tiempo y `elapsedMs`
+
+- `LoadingTimeInterceptor` (`@Component`, `HandlerInterceptor`) se registra en
+  `WebMvcConfig` con `addPathPatterns("/**")`. `preHandle()` guarda
+  `System.nanoTime()` como **atributo del request** (el interceptor es singleton:
+  nunca guardes estado de la petición en un campo) y `afterCompletion()`
+  registra método, URI, status y milisegundos. El método estático
+  `elapsedMillis(request)` calcula el tiempo desde `preHandle()`.
+- `ElapsedTimeResponseAdvice` (`@RestControllerAdvice` + `ResponseBodyAdvice`)
+  agrega `elapsedMs` al JSON antes de escribirlo (un interceptor no puede: el
+  body de un `@RestController` ya está escrito en `postHandle()`). Objetos:
+  agrega el campo al final con `JsonMapper.valueToTree`; listas: las envuelve
+  en `{ "data": ..., "elapsedMs": ... }`; `ProblemDetail`: lo agrega como
+  propiedad; sin body (204) o no JSON: no toca la respuesta.
+- El advice se limita con `basePackages` al package `controllers`, para no
+  alterar el JSON de springdoc (`/v3/api-docs`) ni los errores de Spring Boot
+  fuera de los controllers. Mantén ese límite.
+- Los endpoints de Actuator no pasan por el interceptor.
 - Por decisión del curso, en esta etapa **no** hay DTOs, mapper ni repository:
   el service devuelve `Invoice` directamente. No los agregues salvo que el
   usuario lo pida.

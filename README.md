@@ -19,6 +19,7 @@ todo el curso.
 - [Ejemplo de inyección de dependencias](#ejemplo-de-inyección-de-dependencias)
 - [Ciclo de vida del componente Invoice](#ciclo-de-vida-del-componente-invoice)
 - [Alcance por sesión: @SessionScope](#alcance-por-sesión-sessionscope)
+- [Interceptor: tiempo de cada request](#interceptor-tiempo-de-cada-request)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -94,7 +95,11 @@ src/
 │   │   ├── Application.java                  # clase principal (@SpringBootApplication)
 │   │   ├── config/
 │   │   │   ├── AppConfig.java                # @Bean ContextCleanupListener + listas de items (PC, supermercado, JSON y CSV)
-│   │   │   └── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
+│   │   │   ├── InvoiceItemsSource.java       # calificador personalizado para elegir la lista
+│   │   │   └── WebMvcConfig.java             # registra el interceptor para todos los endpoints
+│   │   ├── interceptors/
+│   │   │   ├── LoadingTimeInterceptor.java   # mide el tiempo de cada request y lo registra en el log
+│   │   │   └── ElapsedTimeResponseAdvice.java # agrega "elapsedMs" al JSON de respuesta
 │   │   ├── models/
 │   │   │   ├── Customer.java                 # componente: nombre y apellido del cliente
 │   │   │   ├── Invoice.java                  # componente @SessionScope: descripción + Customer e items + total + ciclo de vida
@@ -375,9 +380,13 @@ Respuesta de `GET /api/invoices`:
     { "product": { "name": "Atún en lata 160 g", "price": 1890, "...": "..." }, "quantity": 4, "total": 7560 },
     "... (10 items en total)"
   ],
-  "total": 37710
+  "total": 37710,
+  "elapsedMs": 28
 }
 ```
+
+El campo `elapsedMs` lo agrega `ElapsedTimeResponseAdvice` (ver
+[Interceptor: tiempo de cada request](#interceptor-tiempo-de-cada-request)).
 
 En esta etapa el service devuelve el componente `Invoice` directamente, por eso
 la respuesta incluye las fechas `createdAt`/`updatedAt` del producto. Los DTOs
@@ -643,6 +652,124 @@ Con `@SessionScope` (o `@RequestScope`) no se usa: Spring ejecuta el
 `ServletContext` y su `@PreDestroy` se ejecuta al cerrarlo; Spring Boot con
 Tomcat embebido no registra por defecto el listener que dispara ese cierre. Se
 mantiene para poder volver a ese scope sin perder el `@PreDestroy`.
+
+## Interceptor: tiempo de cada request
+
+Un **interceptor** de Spring MVC (`HandlerInterceptor`) se ejecuta antes y
+después de cada controller, sin tocar el código de los controllers. El
+proyecto usa uno para medir cuánto tarda cada request.
+
+### `LoadingTimeInterceptor`
+
+```java
+@Component
+public class LoadingTimeInterceptor implements HandlerInterceptor {
+
+    private static final String START_TIME = LoadingTimeInterceptor.class.getName() + ".startTime";
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        request.setAttribute(START_TIME, System.nanoTime());
+        log.info("preHandle(): entrando a {} {}", request.getMethod(), request.getRequestURI());
+        return true;
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        Long elapsedMs = elapsedMillis(request);
+        if (elapsedMs != null) {
+            log.info("afterCompletion(): {} {} -> status {} en {} ms",
+                    request.getMethod(), request.getRequestURI(), response.getStatus(), elapsedMs);
+        }
+    }
+
+    public static Long elapsedMillis(HttpServletRequest request) {
+        if (request.getAttribute(START_TIME) instanceof Long start) {
+            return (System.nanoTime() - start) / 1_000_000;
+        }
+        return null;
+    }
+}
+```
+
+| Método | Cuándo se ejecuta | Qué hace |
+|---|---|---|
+| `preHandle()` | Antes del controller | Guarda el instante de inicio. Devuelve `true` para que la petición siga; con `false` la cortaría. |
+| `afterCompletion()` | Al terminar la petición, incluso si hubo una excepción | Calcula el tiempo y lo registra en el log. |
+
+El tiempo de inicio se guarda como **atributo del request** y no en un campo de
+la clase: el interceptor es un singleton compartido por todas las peticiones, y
+con un campo dos peticiones simultáneas se pisarían el valor.
+
+Se registra para todos los endpoints en `WebMvcConfig`:
+
+```java
+@Configuration
+public class WebMvcConfig implements WebMvcConfigurer {
+
+    private final LoadingTimeInterceptor loadingTimeInterceptor;
+
+    public WebMvcConfig(LoadingTimeInterceptor loadingTimeInterceptor) {
+        this.loadingTimeInterceptor = loadingTimeInterceptor;
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(loadingTimeInterceptor).addPathPatterns("/**");
+    }
+}
+```
+
+El log muestra, por cada petición:
+
+```
+preHandle(): entrando a GET /api/invoices
+afterCompletion(): GET /api/invoices -> status 200 en 35 ms
+preHandle(): entrando a POST /api/invoices/close
+afterCompletion(): POST /api/invoices/close -> status 204 en 1 ms
+```
+
+Los endpoints de Actuator (`/actuator/health`) no pasan por este interceptor,
+porque Spring Boot los atiende por un mecanismo separado.
+
+### El tiempo en el JSON: `ElapsedTimeResponseAdvice`
+
+Un interceptor no puede agregar datos al JSON: cuando se ejecuta lo que viene
+después del controller, el body de un `@RestController` ya se escribió en la
+respuesta. Para eso se usa un **`ResponseBodyAdvice`**, que Spring ejecuta
+después del controller y justo antes de escribir el body:
+
+```java
+@RestControllerAdvice(basePackages = "com.andres.course.claude.springboot.springdi.app.controllers")
+public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
+
+    @Override
+    public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
+                                  Class<? extends HttpMessageConverter<?>> selectedConverterType,
+                                  ServerHttpRequest request, ServerHttpResponse response) {
+        // ... calcula elapsedMs con LoadingTimeInterceptor.elapsedMillis(...)
+        JsonNode json = jsonMapper.valueToTree(body);
+        if (json instanceof ObjectNode object) {
+            object.put("elapsedMs", elapsedMs);
+            return object;
+        }
+        // ...
+    }
+}
+```
+
+| Tipo de respuesta | Qué hace |
+|---|---|
+| Objeto JSON (como la factura) | Agrega `elapsedMs` al final, sin cambiar los demás campos. |
+| Lista | La envuelve: `{ "data": [...], "elapsedMs": 12 }`. |
+| Error `ProblemDetail` | Agrega `elapsedMs` como una propiedad más. |
+| Sin body (`204 No Content`) o no JSON | No la toca. |
+
+- Se limita con `basePackages` a los controllers del proyecto: así no altera el
+  JSON de Swagger (`/v3/api-docs`) ni los errores que Spring Boot genera fuera
+  de los controllers (por ejemplo, el 404 de una ruta que no existe).
+- `elapsedMs` es algo menor que el tiempo del log: el JSON se arma antes de
+  escribir la respuesta, y el log se escribe cuando ya terminó.
 
 ## Uso
 
