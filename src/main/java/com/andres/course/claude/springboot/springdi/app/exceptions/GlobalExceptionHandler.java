@@ -1,5 +1,6 @@
 package com.andres.course.claude.springboot.springdi.app.exceptions;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -8,14 +9,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-// Manejo centralizado de excepciones de los @RestController: cada método
+// Manejo centralizado de excepciones de la aplicación: cada método
 // @ExceptionHandler atrapa un tipo de excepción y la convierte en una respuesta
 // ProblemDetail, sin necesidad de try-catch en los controllers.
 // ProblemDetail admite propiedades propias: todas las respuestas llevan
@@ -25,15 +27,32 @@ import java.util.Map;
 // MethodArgumentTypeMismatchException. Este advice va primero para que sus
 // @ExceptionHandler (por ejemplo, NumberFormatException) tengan prioridad; lo que
 // no maneja aquí sigue cayendo en el de Spring Boot.
+// Sin filtro (annotations/basePackages): una ruta que no existe no llega a ningún
+// controller, y un advice filtrado por controller no la vería.
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(annotations = RestController.class)
+@RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
-        return problem(HttpStatus.NOT_FOUND, ex.getMessage());
+    // Maneja los 404:
+    // - ResourceNotFoundException: se busca un recurso por su id y no existe.
+    // - NoResourceFoundException / NoHandlerFoundException: la ruta (página o
+    //   endpoint) no existe. Spring Boot lanza NoResourceFoundException para las
+    //   rutas que no coinciden con ningún controller ni archivo estático.
+    @ExceptionHandler({ResourceNotFoundException.class, NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ProblemDetail handleNotFound(Exception ex, HttpServletRequest request) {
+        ProblemDetail problem;
+        if (ex instanceof ResourceNotFoundException) {
+            problem = problem(HttpStatus.NOT_FOUND, ex.getMessage());
+            problem.setTitle("Recurso no encontrado");
+        } else {
+            problem = problem(HttpStatus.NOT_FOUND,
+                    "La ruta " + request.getRequestURI() + " no existe. Revisa que la dirección esté bien escrita.");
+            problem.setTitle("Página no encontrada");
+        }
+        log.warn("handleNotFound(): {} {} -> {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
+        return problem;
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -44,11 +44,11 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor; closeInvoice() quita la factura de la sesión
 │   ├── controllers/
 │   │   ├── AppController.java          # GET /api/app/greeting, /api/app/date, /api/app/languages (ejemplos simples)
-│   │   ├── AppFailController.java      # GET /api/fail?dividend=10&divisor=1 (división con 4 decimales; probar manejo de errores)
+│   │   ├── AppFailController.java      # GET /api/fail?dividend=10&divisor=1 (división con 4 decimales) y GET /api/fail/products/{id} (404 si no existe)
 │   │   └── InvoiceController.java      # GET /api/invoices (registra instancia y hashCode) y POST /api/invoices/close (cierra solo la factura)
 │   └── exceptions/
-│       ├── ResourceNotFoundException.java
-│       └── GlobalExceptionHandler.java # @Order(HIGHEST_PRECEDENCE) @RestControllerAdvice -> ProblemDetail con "timestamp" (404, 400 validación, ArithmeticException, NumberFormatException)
+│       ├── ResourceNotFoundException.java  # recurso buscado por id que no existe -> 404 ("No encontramos el producto con id 9.")
+│       └── GlobalExceptionHandler.java # @Order(HIGHEST_PRECEDENCE) @RestControllerAdvice -> ProblemDetail con "timestamp" (404 de rutas y recursos, 400 validación, ArithmeticException, NumberFormatException)
 ├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo, sesiones (persistent=false, app.session.timeout=30s, background-processor-delay=5s)
 ├── src/main/resources/data/invoice-items.json  # 8 items de supermercado que lee el bean itemsJson
 ├── src/main/resources/data/invoice-items.csv   # 10 items de supermercado que lee el bean itemsCsv
@@ -201,8 +201,8 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   10 y 1) y devuelve `{dividend, divisor, result}` con
   `divide(divisor, 4, RoundingMode.HALF_UP)`. **No tiene try-catch**: si el
   divisor es 0, la `ArithmeticException` sale del controller.
-- `GlobalExceptionHandler` (`@RestControllerAdvice(annotations = RestController.class)`)
-  es el lugar para manejar excepciones; agrega ahí los nuevos
+- `GlobalExceptionHandler` (`@RestControllerAdvice`, **sin filtro** de
+  `annotations` ni `basePackages`) es el lugar para manejar excepciones; agrega ahí los nuevos
   `@ExceptionHandler` en vez de usar try-catch en los controllers.
   `handleArithmetic` maneja solo `ArithmeticException`: registra el detalle
   técnico en el log (`log.warn`) y responde 400 con un mensaje en lenguaje
@@ -212,18 +212,25 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   (`?divisor=2x`), donde Spring lanza `MethodArgumentTypeMismatchException`
   con `NumberFormatException` como causa; `@ExceptionHandler` también busca
   por la causa.
+  `handleNotFound(Exception, HttpServletRequest)` maneja los 404:
+  `ResourceNotFoundException` (recurso buscado por id que no existe, `title`
+  "Recurso no encontrado", `detail` = mensaje de la excepción) y
+  `NoResourceFoundException`/`NoHandlerFoundException` (ruta inexistente,
+  `title` "Página no encontrada", `detail` con la URI).
+- El advice **no lleva filtro** (`annotations = RestController.class` se
+  quitó): una ruta que no existe no llega a ningún controller, y un advice
+  filtrado por controller no vería su `NoResourceFoundException`. No vuelvas a
+  agregar ese filtro.
 - `GlobalExceptionHandler` lleva `@Order(Ordered.HIGHEST_PRECEDENCE)`: Spring
   Boot registra su propio advice de errores (`spring.mvc.problemdetails.enabled=true`)
   que maneja `MethodArgumentTypeMismatchException` y se evaluaba antes; sin
-  esa prioridad `handleNumberFormat` nunca se ejecuta. No la quites. Lo que
-  este advice no maneja (por ejemplo, el 404 de una ruta inexistente) sigue
-  respondiéndolo Spring Boot.
+  esa prioridad `handleNumberFormat` y `handleNotFound` no se ejecutan. No la
+  quites. Lo que este advice no maneja sigue respondiéndolo Spring Boot.
 - Todos los `ProblemDetail` se crean con el método privado `problem(status, detail)`,
   que agrega la propiedad `timestamp` (`Instant.now()`, ISO-8601 UTC) para
   trazabilidad. Se usa `ProblemDetail` (RFC 9457) en vez de un DTO de error.
-- Los errores que este advice no maneja (por ejemplo, un 404 de ruta
-  inexistente o un parámetro obligatorio que falta) salen con el mensaje de
-  Spring Boot, sin `timestamp` ni `elapsedMs`.
+- Los errores que este advice no maneja (por ejemplo, un método HTTP no
+  permitido) salen con el mensaje de Spring Boot, sin `timestamp` ni `elapsedMs`.
 - Los endpoints de Actuator no pasan por el interceptor.
 - Por decisión del curso, en esta etapa **no** hay DTOs, mapper ni repository:
   el service devuelve `Invoice` directamente. No los agregues salvo que el
@@ -245,6 +252,7 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - Endpoint de ejemplo: http://localhost:8080/api/invoices
 - Ejemplos simples: http://localhost:8080/api/app/greeting, `/api/app/date`, `/api/app/languages`
 - Manejo de errores: http://localhost:8080/api/fail?dividend=10&divisor=3 (con `divisor=0` responde 400)
+- 404: http://localhost:8080/api/fail/products/9 (recurso) y http://localhost:8080/api/noexiste (ruta)
 - Cerrar la sesión (POST): `curl -X POST -b cookies.txt http://localhost:8080/api/invoices/close`
 
 ## Available skills

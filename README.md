@@ -115,11 +115,11 @@ src/
 │   │   │   └── InvoiceServiceImpl.java       # implementación (@Service)
 │   │   ├── controllers/
 │   │   │   ├── AppController.java            # GET /api/app/greeting, /date y /languages
-│   │   │   ├── AppFailController.java        # GET /api/fail: división para probar el manejo de errores
+│   │   │   ├── AppFailController.java        # GET /api/fail (división) y /api/fail/products/{id}: probar el manejo de errores
 │   │   │   └── InvoiceController.java        # GET /api/invoices y POST /api/invoices/close
 │   │   └── exceptions/
-│   │       ├── ResourceNotFoundException.java
-│   │       └── GlobalExceptionHandler.java   # ProblemDetail con timestamp: 404, 400 de validación, ArithmeticException y NumberFormatException
+│   │       ├── ResourceNotFoundException.java # recurso buscado por id que no existe (404)
+│   │       └── GlobalExceptionHandler.java   # ProblemDetail con timestamp: 404 (rutas y recursos), 400 de validación, ArithmeticException y NumberFormatException
 │   └── resources/
 │       ├── application.properties            # Swagger UI, Actuator, ProblemDetail, sesiones y datos de ejemplo
 │       └── data/
@@ -788,8 +788,7 @@ public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
 - Se limita con `basePackages` a los packages `controllers` y `exceptions`:
   así cubre las respuestas de los controllers y los errores de
   `GlobalExceptionHandler`, pero no altera el JSON de Swagger (`/v3/api-docs`)
-  ni los errores que Spring Boot genera por su cuenta (por ejemplo, el 404 de
-  una ruta que no existe).
+  ni los errores que Spring Boot genera por su cuenta.
 - Los `ProblemDetail` se escriben como `application/problem+json`, no como
   `application/json`; por eso el advice acepta los dos tipos de contenido.
 - `elapsedMs` y el log muestran **exactamente el mismo número**.
@@ -967,12 +966,12 @@ El handler solo no basta: el advice de Spring Boot (activo por
 
 ```java
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(annotations = RestController.class)
+@RestControllerAdvice
 public class GlobalExceptionHandler {
 ```
 
-Lo que `GlobalExceptionHandler` no maneja (por ejemplo, el 404 de una ruta
-que no existe) sigue respondiéndolo Spring Boot como antes.
+Lo que `GlobalExceptionHandler` no maneja sigue respondiéndolo Spring Boot
+como antes.
 
 | Petición | Status | `title` |
 |---|---|---|
@@ -998,6 +997,75 @@ Respuesta con `divisor=2x`:
   solo en el log.
 - El mismo handler atrapa cualquier `NumberFormatException` que lance un
   controller en su propio código (por ejemplo, `Integer.parseInt("abc")`).
+
+### No encontrado (404): rutas y recursos
+
+Un 404 aparece en dos situaciones, y `GlobalExceptionHandler` las maneja con
+un solo método:
+
+- **La ruta no existe** (una página o endpoint mal escrito): Spring Boot lanza
+  `NoResourceFoundException` cuando la ruta no coincide con ningún controller
+  ni archivo estático (`NoHandlerFoundException` es la variante clásica).
+- **El recurso no existe**: se busca algo por su id y no está. El código lanza
+  `ResourceNotFoundException`.
+
+```java
+@ExceptionHandler({ResourceNotFoundException.class, NoResourceFoundException.class, NoHandlerFoundException.class})
+public ProblemDetail handleNotFound(Exception ex, HttpServletRequest request) {
+    ProblemDetail problem;
+    if (ex instanceof ResourceNotFoundException) {
+        problem = problem(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Recurso no encontrado");
+    } else {
+        problem = problem(HttpStatus.NOT_FOUND,
+                "La ruta " + request.getRequestURI() + " no existe. Revisa que la dirección esté bien escrita.");
+        problem.setTitle("Página no encontrada");
+    }
+    log.warn("handleNotFound(): {} {} -> {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
+    return problem;
+}
+```
+
+Para que el advice vea las rutas inexistentes, `@RestControllerAdvice` va
+**sin filtro**: con `annotations = RestController.class` solo se aplicaría a
+excepciones lanzadas desde un controller, y una ruta que no existe no llega a
+ninguno.
+
+`ResourceNotFoundException` se lanza al buscar un recurso por id. En
+`AppFailController` hay un ejemplo que simula una búsqueda de productos (solo
+existen los ids 1, 2 y 3):
+
+```java
+@GetMapping("/products/{id}")
+public Map<String, Object> product(@PathVariable Long id) {
+    String name = PRODUCTS.get(id);
+    if (name == null) {
+        throw new ResourceNotFoundException("el producto", id);
+    }
+    return Map.of("id", id, "name", name);
+}
+```
+
+| Petición | Status | `title` | `detail` |
+|---|---|---|---|
+| `/api/fail/products/1` | 200 | — | `{"id":1,"name":"Notebook",...}` |
+| `/api/fail/products/9` | 404 | Recurso no encontrado | No encontramos el producto con id 9. |
+| `/api/noexiste` | 404 | Página no encontrada | La ruta /api/noexiste no existe. Revisa que la dirección esté bien escrita. |
+| `/pagina/inventada` | 404 | Página no encontrada | La ruta /pagina/inventada no existe. Revisa que la dirección esté bien escrita. |
+| `/api/fail/products/2x` | 400 | Valor no numérico | (lo maneja `handleNumberFormat`) |
+
+Respuesta con `/api/fail/products/9`:
+
+```json
+{
+  "detail": "No encontramos el producto con id 9.",
+  "instance": "/api/fail/products/9",
+  "status": 404,
+  "title": "Recurso no encontrado",
+  "timestamp": "2026-11-16T15:33:31.535821Z",
+  "elapsedMs": 10
+}
+```
 
 ## Uso
 
@@ -1165,6 +1233,7 @@ aplicación o de ejecutar los tests.
 | http://localhost:8080/api/app/date | Fecha y fecha-hora del servidor (excluido del interceptor) |
 | http://localhost:8080/api/app/languages | Lista de lenguajes (excluido del interceptor) |
 | http://localhost:8080/api/fail?dividend=10&divisor=3 | División con 4 decimales; con `divisor=0` responde 400 (manejo de errores) |
+| http://localhost:8080/api/fail/products/1 | Producto por id; con un id inexistente (por ejemplo, 9) responde 404 |
 
 ## Pruebas de la skill
 
