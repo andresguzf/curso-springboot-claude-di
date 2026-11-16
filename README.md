@@ -21,6 +21,7 @@ todo el curso.
 - [Alcance por sesión: @SessionScope](#alcance-por-sesión-sessionscope)
 - [Interceptor: tiempo de cada request](#interceptor-tiempo-de-cada-request)
 - [Controller de ejemplo: AppController](#controller-de-ejemplo-appcontroller)
+- [Manejo de errores: AppFailController](#manejo-de-errores-appfailcontroller)
 - [Uso](#uso)
 - [Arquitectura de capas](#arquitectura-de-capas)
 - [Persistencia bajo demanda](#persistencia-bajo-demanda)
@@ -114,10 +115,11 @@ src/
 │   │   │   └── InvoiceServiceImpl.java       # implementación (@Service)
 │   │   ├── controllers/
 │   │   │   ├── AppController.java            # GET /api/app/greeting, /date y /languages
+│   │   │   ├── AppFailController.java        # GET /api/fail: división para probar el manejo de errores
 │   │   │   └── InvoiceController.java        # GET /api/invoices y POST /api/invoices/close
 │   │   └── exceptions/
 │   │       ├── ResourceNotFoundException.java
-│   │       └── GlobalExceptionHandler.java   # ProblemDetail: 404 y 400 de validación
+│   │       └── GlobalExceptionHandler.java   # ProblemDetail con timestamp: 404, 400 de validación y ArithmeticException
 │   └── resources/
 │       ├── application.properties            # Swagger UI, Actuator, ProblemDetail, sesiones y datos de ejemplo
 │       └── data/
@@ -755,7 +757,10 @@ respuesta. Para eso se usa un **`ResponseBodyAdvice`**, que Spring ejecuta
 después del controller y justo antes de escribir el body:
 
 ```java
-@RestControllerAdvice(basePackages = "com.andres.course.claude.springboot.springdi.app.controllers")
+@RestControllerAdvice(basePackages = {
+        "com.andres.course.claude.springboot.springdi.app.controllers",
+        "com.andres.course.claude.springboot.springdi.app.exceptions"
+})
 public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
 
     @Override
@@ -777,12 +782,16 @@ public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
 |---|---|
 | Objeto JSON (como la factura) | Agrega `elapsedMs` al final, sin cambiar los demás campos. |
 | Lista | La envuelve: `{ "data": [...], "elapsedMs": 12 }`. |
-| Error `ProblemDetail` | Agrega `elapsedMs` como una propiedad más. |
+| Error `ProblemDetail` (`application/problem+json`) | Agrega `elapsedMs` como una propiedad más. |
 | Sin body (`204 No Content`) o no JSON | No la toca. |
 
-- Se limita con `basePackages` a los controllers del proyecto: así no altera el
-  JSON de Swagger (`/v3/api-docs`) ni los errores que Spring Boot genera fuera
-  de los controllers (por ejemplo, el 404 de una ruta que no existe).
+- Se limita con `basePackages` a los packages `controllers` y `exceptions`:
+  así cubre las respuestas de los controllers y los errores de
+  `GlobalExceptionHandler`, pero no altera el JSON de Swagger (`/v3/api-docs`)
+  ni los errores que Spring Boot genera por su cuenta (por ejemplo, el 404 de
+  una ruta que no existe).
+- Los `ProblemDetail` se escriben como `application/problem+json`, no como
+  `application/json`; por eso el advice acepta los dos tipos de contenido.
 - `elapsedMs` y el log muestran **exactamente el mismo número**.
   `elapsedMillis(request)` calcula el tiempo una sola vez por request y lo
   guarda: el advice lo pide primero, al armar el JSON, y `afterCompletion()`
@@ -836,6 +845,94 @@ public class AppController {
   no se envuelve en `{ "data": [...] }`.
 - `Map.of` no garantiza el orden de los campos, así que en `date` pueden salir
   en cualquier orden.
+
+## Manejo de errores: `AppFailController`
+
+`AppFailController` divide dos números que envía el usuario y sirve para
+probar el manejo de errores. No tiene `try-catch`: la división por cero la
+maneja `GlobalExceptionHandler`, el `@RestControllerAdvice` del proyecto.
+
+```java
+@RestController
+@RequestMapping("/api/fail")
+public class AppFailController {
+
+    private static final int DECIMALS = 4;
+
+    @GetMapping
+    public Map<String, Object> handler(@RequestParam(defaultValue = "10") BigDecimal dividend,
+                                       @RequestParam(defaultValue = "1") BigDecimal divisor) {
+        // si divisor es 0 lanza ArithmeticException
+        BigDecimal result = dividend.divide(divisor, DECIMALS, RoundingMode.HALF_UP);
+        return Map.of("dividend", dividend, "divisor", divisor, "result", result);
+    }
+}
+```
+
+- `dividend` y `divisor` son `BigDecimal`: aceptan decimales y negativos, y el
+  resultado se redondea a 4 decimales con `RoundingMode.HALF_UP`. Con `int` no
+  habría decimales y con `double` 10 / 3 daría `3.3333333333333335`.
+- Si no se envían, valen 10 y 1; cada uno se puede enviar por separado.
+
+### `@ExceptionHandler` en `GlobalExceptionHandler`
+
+Un `@RestControllerAdvice` centraliza el manejo de excepciones: cada método
+`@ExceptionHandler` atrapa un tipo de excepción lanzada por cualquier
+controller y la convierte en una respuesta, sin `try-catch` en los controllers.
+
+```java
+@ExceptionHandler(ArithmeticException.class)
+public ProblemDetail handleArithmetic(ArithmeticException ex) {
+    log.warn("handleArithmetic(): error en la operación: {}", ex.getMessage());
+    ProblemDetail problem = problem(HttpStatus.BAD_REQUEST,
+            "No pudimos completar la operación porque no se puede dividir un número por cero.");
+    problem.setTitle("Error en la operación");
+    return problem;
+}
+
+// Crea el ProblemDetail y le agrega la fecha y hora del error
+private static ProblemDetail problem(HttpStatus status, String detail) {
+    ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+    problem.setProperty("timestamp", Instant.now());
+    return problem;
+}
+```
+
+- El detalle técnico (`/ by zero`) va al log; el usuario recibe un mensaje en
+  lenguaje natural.
+- Responde **400 Bad Request** porque el error viene de un dato que envió el
+  usuario.
+- La respuesta usa `ProblemDetail`, el formato estándar de errores HTTP
+  (RFC 9457), en vez de un DTO propio. Admite propiedades adicionales: todos
+  los errores del advice llevan `timestamp` (`Instant`, ISO-8601 en UTC) para
+  seguimiento y trazabilidad.
+
+| Petición | Status | Respuesta |
+|---|---|---|
+| `/api/fail` | 200 | `{"dividend":10,"divisor":1,"result":10.0000,"elapsedMs":10}` |
+| `/api/fail?dividend=10&divisor=3` | 200 | `{"dividend":10,"divisor":3,"result":3.3333,"elapsedMs":9}` |
+| `/api/fail?dividend=7.5&divisor=-2` | 200 | `{"dividend":7.5,"divisor":-2,"result":-3.7500,...}` |
+| `/api/fail?dividend=10&divisor=0` | 400 | ver abajo |
+| `/api/fail?divisor=abc` | 400 | `{"detail":"Failed to convert 'divisor' with value: 'abc'",...}` (mensaje de Spring) |
+
+Respuesta con `divisor=0`:
+
+```json
+{
+  "detail": "No pudimos completar la operación porque no se puede dividir un número por cero.",
+  "instance": "/api/fail",
+  "status": 400,
+  "title": "Error en la operación",
+  "timestamp": "2026-11-16T15:09:20.787041Z",
+  "elapsedMs": 16
+}
+```
+
+- `elapsedMs` coincide con el log del interceptor (`status 400 en 16 ms`).
+- Un valor que no es número (`abc`) falla antes de entrar al controller, al
+  convertir el parámetro: lo resuelve Spring por su cuenta, en inglés y sin
+  `timestamp` ni `elapsedMs`.
+- `Map.of` no garantiza el orden de los campos en la respuesta.
 
 ## Uso
 
@@ -1002,6 +1099,7 @@ aplicación o de ejecutar los tests.
 | http://localhost:8080/api/app/greeting | Saludo (`?name=` opcional), con `elapsedMs` |
 | http://localhost:8080/api/app/date | Fecha y fecha-hora del servidor (excluido del interceptor) |
 | http://localhost:8080/api/app/languages | Lista de lenguajes (excluido del interceptor) |
+| http://localhost:8080/api/fail?dividend=10&divisor=3 | División con 4 decimales; con `divisor=0` responde 400 (manejo de errores) |
 
 ## Pruebas de la skill
 

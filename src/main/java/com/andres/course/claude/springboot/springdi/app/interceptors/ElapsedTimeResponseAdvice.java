@@ -17,9 +17,13 @@ import tools.jackson.databind.node.ObjectNode;
 // ResponseBodyAdvice se ejecuta después del controller y antes de escribir el body,
 // así que puede modificar la respuesta (un HandlerInterceptor no puede: cuando
 // corre postHandle() el JSON de un @RestController ya se escribió).
-// Se limita a los controllers del proyecto para no alterar el JSON de springdoc
-// (/v3/api-docs) ni el de los errores de Spring Boot (/error).
-@RestControllerAdvice(basePackages = "com.andres.course.claude.springboot.springdi.app.controllers")
+// Se limita a los controllers del proyecto y a su manejo de excepciones
+// (GlobalExceptionHandler, en el package exceptions) para no alterar el JSON de
+// springdoc (/v3/api-docs) ni el de los errores de Spring Boot (/error).
+@RestControllerAdvice(basePackages = {
+        "com.andres.course.claude.springboot.springdi.app.controllers",
+        "com.andres.course.claude.springboot.springdi.app.exceptions"
+})
 public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
 
     private static final String ELAPSED_FIELD = "elapsedMs";
@@ -39,8 +43,9 @@ public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
     public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
                                   Class<? extends HttpMessageConverter<?>> selectedConverterType,
                                   ServerHttpRequest request, ServerHttpResponse response) {
-        // Sin body (por ejemplo 204 No Content) o si no es JSON, no se toca la respuesta
-        if (body == null || !MediaType.APPLICATION_JSON.isCompatibleWith(selectedContentType)
+        // Sin body (por ejemplo 204 No Content) o si no es JSON, no se toca la respuesta.
+        // Los errores ProblemDetail se escriben como application/problem+json.
+        if (body == null || !isJson(selectedContentType)
                 || !(request instanceof ServletServerHttpRequest servletRequest)) {
             return body;
         }
@@ -64,5 +69,10 @@ public class ElapsedTimeResponseAdvice implements ResponseBodyAdvice<Object> {
         wrapper.set("data", json);
         wrapper.put(ELAPSED_FIELD, elapsedMs);
         return wrapper;
+    }
+
+    private static boolean isJson(MediaType contentType) {
+        return MediaType.APPLICATION_JSON.isCompatibleWith(contentType)
+                || MediaType.APPLICATION_PROBLEM_JSON.isCompatibleWith(contentType);
     }
 }

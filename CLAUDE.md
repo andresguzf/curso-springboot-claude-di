@@ -44,10 +44,11 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   └── InvoiceServiceImpl.java     # @Service, recibe Invoice por constructor; closeInvoice() quita la factura de la sesión
 │   ├── controllers/
 │   │   ├── AppController.java          # GET /api/app/greeting, /api/app/date, /api/app/languages (ejemplos simples)
+│   │   ├── AppFailController.java      # GET /api/fail?dividend=10&divisor=1 (división con 4 decimales; probar manejo de errores)
 │   │   └── InvoiceController.java      # GET /api/invoices (registra instancia y hashCode) y POST /api/invoices/close (cierra solo la factura)
 │   └── exceptions/
 │       ├── ResourceNotFoundException.java
-│       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail (404, 400)
+│       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail con "timestamp" (404, 400 validación, 400 ArithmeticException)
 ├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo, sesiones (persistent=false, app.session.timeout=30s, background-processor-delay=5s)
 ├── src/main/resources/data/invoice-items.json  # 8 items de supermercado que lee el bean itemsJson
 ├── src/main/resources/data/invoice-items.csv   # 10 items de supermercado que lee el bean itemsCsv
@@ -184,10 +185,35 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   body de un `@RestController` ya está escrito en `postHandle()`). Objetos:
   agrega el campo al final con `JsonMapper.valueToTree`; listas: las envuelve
   en `{ "data": ..., "elapsedMs": ... }`; `ProblemDetail`: lo agrega como
-  propiedad; sin body (204) o no JSON: no toca la respuesta.
-- El advice se limita con `basePackages` al package `controllers`, para no
-  alterar el JSON de springdoc (`/v3/api-docs`) ni los errores de Spring Boot
-  fuera de los controllers. Mantén ese límite.
+  propiedad; sin body (204) o no JSON: no toca la respuesta. Considera JSON
+  tanto `application/json` como `application/problem+json` (el tipo con que
+  se escriben los `ProblemDetail`).
+- El advice se limita con `basePackages` a los packages `controllers` y
+  `exceptions` (este último para que los errores de `GlobalExceptionHandler`
+  también lleven `elapsedMs`), para no alterar el JSON de springdoc
+  (`/v3/api-docs`) ni los errores de Spring Boot fuera de esos packages.
+  Mantén ese límite.
+
+### Manejo de errores (`AppFailController` + `GlobalExceptionHandler`)
+
+- `AppFailController` (`/api/fail`) sirve para probar el manejo de errores:
+  recibe `dividend` y `divisor` como `@RequestParam BigDecimal` (por defecto
+  10 y 1) y devuelve `{dividend, divisor, result}` con
+  `divide(divisor, 4, RoundingMode.HALF_UP)`. **No tiene try-catch**: si el
+  divisor es 0, la `ArithmeticException` sale del controller.
+- `GlobalExceptionHandler` (`@RestControllerAdvice(annotations = RestController.class)`)
+  es el lugar para manejar excepciones; agrega ahí los nuevos
+  `@ExceptionHandler` en vez de usar try-catch en los controllers.
+  `handleArithmetic` maneja solo `ArithmeticException`: registra el detalle
+  técnico en el log (`log.warn`) y responde 400 con un mensaje en lenguaje
+  natural para el usuario y `title` "Error en la operación".
+- Todos los `ProblemDetail` se crean con el método privado `problem(status, detail)`,
+  que agrega la propiedad `timestamp` (`Instant.now()`, ISO-8601 UTC) para
+  trazabilidad. Se usa `ProblemDetail` (RFC 9457) en vez de un DTO de error.
+- Los errores que Spring resuelve antes del controller (por ejemplo
+  `?divisor=abc`, que no se puede convertir a número) no pasan por
+  `GlobalExceptionHandler`: salen con el mensaje de Spring, sin `timestamp` ni
+  `elapsedMs`.
 - Los endpoints de Actuator no pasan por el interceptor.
 - Por decisión del curso, en esta etapa **no** hay DTOs, mapper ni repository:
   el service devuelve `Invoice` directamente. No los agregues salvo que el
@@ -208,6 +234,7 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
 - Swagger UI: http://localhost:8080/swagger-ui.html · Health: http://localhost:8080/actuator/health
 - Endpoint de ejemplo: http://localhost:8080/api/invoices
 - Ejemplos simples: http://localhost:8080/api/app/greeting, `/api/app/date`, `/api/app/languages`
+- Manejo de errores: http://localhost:8080/api/fail?dividend=10&divisor=3 (con `divisor=0` responde 400)
 - Cerrar la sesión (POST): `curl -X POST -b cookies.txt http://localhost:8080/api/invoices/close`
 
 ## Available skills
