@@ -48,7 +48,7 @@ Initializr mediante la skill `spring-boot-best-practices`.
 │   │   └── InvoiceController.java      # GET /api/invoices (registra instancia y hashCode) y POST /api/invoices/close (cierra solo la factura)
 │   └── exceptions/
 │       ├── ResourceNotFoundException.java
-│       └── GlobalExceptionHandler.java # @RestControllerAdvice -> ProblemDetail con "timestamp" (404, 400 validación, 400 ArithmeticException)
+│       └── GlobalExceptionHandler.java # @Order(HIGHEST_PRECEDENCE) @RestControllerAdvice -> ProblemDetail con "timestamp" (404, 400 validación, ArithmeticException, NumberFormatException)
 ├── src/main/resources/application.properties   # springdoc, actuator, problemdetails, datos de ejemplo, sesiones (persistent=false, app.session.timeout=30s, background-processor-delay=5s)
 ├── src/main/resources/data/invoice-items.json  # 8 items de supermercado que lee el bean itemsJson
 ├── src/main/resources/data/invoice-items.csv   # 10 items de supermercado que lee el bean itemsCsv
@@ -207,13 +207,23 @@ El proyecto es un ejemplo didáctico de DI, construido paso a paso:
   `handleArithmetic` maneja solo `ArithmeticException`: registra el detalle
   técnico en el log (`log.warn`) y responde 400 con un mensaje en lenguaje
   natural para el usuario y `title` "Error en la operación".
+  `handleNumberFormat` maneja `NumberFormatException` (400, `title` "Valor no
+  numérico"): incluye el caso de un `@RequestParam` numérico con texto
+  (`?divisor=2x`), donde Spring lanza `MethodArgumentTypeMismatchException`
+  con `NumberFormatException` como causa; `@ExceptionHandler` también busca
+  por la causa.
+- `GlobalExceptionHandler` lleva `@Order(Ordered.HIGHEST_PRECEDENCE)`: Spring
+  Boot registra su propio advice de errores (`spring.mvc.problemdetails.enabled=true`)
+  que maneja `MethodArgumentTypeMismatchException` y se evaluaba antes; sin
+  esa prioridad `handleNumberFormat` nunca se ejecuta. No la quites. Lo que
+  este advice no maneja (por ejemplo, el 404 de una ruta inexistente) sigue
+  respondiéndolo Spring Boot.
 - Todos los `ProblemDetail` se crean con el método privado `problem(status, detail)`,
   que agrega la propiedad `timestamp` (`Instant.now()`, ISO-8601 UTC) para
   trazabilidad. Se usa `ProblemDetail` (RFC 9457) en vez de un DTO de error.
-- Los errores que Spring resuelve antes del controller (por ejemplo
-  `?divisor=abc`, que no se puede convertir a número) no pasan por
-  `GlobalExceptionHandler`: salen con el mensaje de Spring, sin `timestamp` ni
-  `elapsedMs`.
+- Los errores que este advice no maneja (por ejemplo, un 404 de ruta
+  inexistente o un parámetro obligatorio que falta) salen con el mensaje de
+  Spring Boot, sin `timestamp` ni `elapsedMs`.
 - Los endpoints de Actuator no pasan por el interceptor.
 - Por decisión del curso, en esta etapa **no** hay DTOs, mapper ni repository:
   el service devuelve `Invoice` directamente. No los agregues salvo que el

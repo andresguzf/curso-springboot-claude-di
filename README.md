@@ -119,7 +119,7 @@ src/
 │   │   │   └── InvoiceController.java        # GET /api/invoices y POST /api/invoices/close
 │   │   └── exceptions/
 │   │       ├── ResourceNotFoundException.java
-│   │       └── GlobalExceptionHandler.java   # ProblemDetail con timestamp: 404, 400 de validación y ArithmeticException
+│   │       └── GlobalExceptionHandler.java   # ProblemDetail con timestamp: 404, 400 de validación, ArithmeticException y NumberFormatException
 │   └── resources/
 │       ├── application.properties            # Swagger UI, Actuator, ProblemDetail, sesiones y datos de ejemplo
 │       └── data/
@@ -913,7 +913,7 @@ private static ProblemDetail problem(HttpStatus status, String detail) {
 | `/api/fail?dividend=10&divisor=3` | 200 | `{"dividend":10,"divisor":3,"result":3.3333,"elapsedMs":9}` |
 | `/api/fail?dividend=7.5&divisor=-2` | 200 | `{"dividend":7.5,"divisor":-2,"result":-3.7500,...}` |
 | `/api/fail?dividend=10&divisor=0` | 400 | ver abajo |
-| `/api/fail?divisor=abc` | 400 | `{"detail":"Failed to convert 'divisor' with value: 'abc'",...}` (mensaje de Spring) |
+| `/api/fail?dividend=10&divisor=2x` | 400 | `"title":"Valor no numérico"` (ver [NumberFormatException](#valores-no-numéricos-numberformatexception)) |
 
 Respuesta con `divisor=0`:
 
@@ -929,10 +929,75 @@ Respuesta con `divisor=0`:
 ```
 
 - `elapsedMs` coincide con el log del interceptor (`status 400 en 16 ms`).
-- Un valor que no es número (`abc`) falla antes de entrar al controller, al
-  convertir el parámetro: lo resuelve Spring por su cuenta, en inglés y sin
-  `timestamp` ni `elapsedMs`.
 - `Map.of` no garantiza el orden de los campos en la respuesta.
+
+### Valores no numéricos: `NumberFormatException`
+
+Si se envía un texto que no es un número, por ejemplo `?divisor=2x`, la
+conversión falla **antes de entrar al controller**: Spring intenta convertir
+`"2x"` a `BigDecimal`, la conversión lanza `NumberFormatException` y Spring la
+envuelve en una `MethodArgumentTypeMismatchException`.
+
+Sin manejo propio, esa excepción la atrapa el advice de errores de Spring
+Boot y responde en inglés, sin `timestamp` ni `elapsedMs`:
+
+```json
+{"detail":"Failed to convert 'divisor' with value: '2x'","instance":"/api/fail","status":400,"title":"Bad Request"}
+```
+
+`GlobalExceptionHandler` la maneja con un `@ExceptionHandler` para
+`NumberFormatException`. Aunque la excepción lanzada es otra, Spring también
+busca un handler por la **causa**, y así llega a este método:
+
+```java
+@ExceptionHandler(NumberFormatException.class)
+public ProblemDetail handleNumberFormat(NumberFormatException ex) {
+    log.warn("handleNumberFormat(): valor no numérico: {}", ex.getMessage());
+    ProblemDetail problem = problem(HttpStatus.BAD_REQUEST,
+            "No pudimos completar la operación porque uno de los valores no es un número válido.");
+    problem.setTitle("Valor no numérico");
+    return problem;
+}
+```
+
+El handler solo no basta: el advice de Spring Boot (activo por
+`spring.mvc.problemdetails.enabled=true`) se evalúa antes y atrapa la
+`MethodArgumentTypeMismatchException` por su tipo. Por eso
+`GlobalExceptionHandler` tiene prioridad:
+
+```java
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RestControllerAdvice(annotations = RestController.class)
+public class GlobalExceptionHandler {
+```
+
+Lo que `GlobalExceptionHandler` no maneja (por ejemplo, el 404 de una ruta
+que no existe) sigue respondiéndolo Spring Boot como antes.
+
+| Petición | Status | `title` |
+|---|---|---|
+| `/api/fail?dividend=10&divisor=2x` | 400 | Valor no numérico |
+| `/api/fail?dividend=abc&divisor=2` | 400 | Valor no numérico |
+| `/api/fail?dividend=10&divisor=0` | 400 | Error en la operación |
+| `/api/fail?divisor=` (vacío) | 200 | usa el valor por defecto, 1 |
+
+Respuesta con `divisor=2x`:
+
+```json
+{
+  "detail": "No pudimos completar la operación porque uno de los valores no es un número válido.",
+  "instance": "/api/fail",
+  "status": 400,
+  "title": "Valor no numérico",
+  "timestamp": "2026-11-16T15:21:20.490750Z",
+  "elapsedMs": 17
+}
+```
+
+- El detalle técnico (`Character x is neither a decimal digit number...`) queda
+  solo en el log.
+- El mismo handler atrapa cualquier `NumberFormatException` que lance un
+  controller en su propio código (por ejemplo, `Integer.parseInt("abc")`).
 
 ## Uso
 

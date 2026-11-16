@@ -28,6 +28,7 @@ public class AppFailController {
                                        @RequestParam(defaultValue = "1") BigDecimal divisor) {
         // divide() con escala 4 redondea a 4 decimales; si divisor es 0 lanza ArithmeticException
         BigDecimal result = dividend.divide(divisor, DECIMALS, RoundingMode.HALF_UP);
+
         return Map.of(
                 "dividend", dividend,
                 "divisor", divisor,

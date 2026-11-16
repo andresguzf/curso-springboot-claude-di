@@ -2,6 +2,8 @@ package com.andres.course.claude.springboot.springdi.app.exceptions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -18,6 +20,12 @@ import java.util.Map;
 // ProblemDetail, sin necesidad de try-catch en los controllers.
 // ProblemDetail admite propiedades propias: todas las respuestas llevan
 // "timestamp" (fecha y hora UTC del error) para seguimiento y trazabilidad.
+// @Order(HIGHEST_PRECEDENCE): Spring Boot registra su propio advice de errores
+// (spring.mvc.problemdetails.enabled=true) que maneja, entre otros,
+// MethodArgumentTypeMismatchException. Este advice va primero para que sus
+// @ExceptionHandler (por ejemplo, NumberFormatException) tengan prioridad; lo que
+// no maneja aquí sigue cayendo en el de Spring Boot.
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(annotations = RestController.class)
 public class GlobalExceptionHandler {
 
@@ -46,6 +54,19 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = problem(HttpStatus.BAD_REQUEST,
                 "No pudimos completar la operación porque no se puede dividir un número por cero.");
         problem.setTitle("Error en la operación");
+        return problem;
+    }
+
+    // Maneja NumberFormatException: un texto que no se puede convertir a número.
+    // Cuando un @RequestParam numérico recibe, por ejemplo, "2x", Spring lanza
+    // MethodArgumentTypeMismatchException con NumberFormatException como causa;
+    // @ExceptionHandler también busca por la causa, así que llega a este método.
+    @ExceptionHandler(NumberFormatException.class)
+    public ProblemDetail handleNumberFormat(NumberFormatException ex) {
+        log.warn("handleNumberFormat(): valor no numérico: {}", ex.getMessage());
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST,
+                "No pudimos completar la operación porque uno de los valores no es un número válido.");
+        problem.setTitle("Valor no numérico");
         return problem;
     }
 
