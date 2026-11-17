@@ -28,8 +28,6 @@ Si el proyecto no tiene persistencia (sin `spring-boot-starter-data-jpa` en el
 package {base}.models;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -51,15 +49,26 @@ public class Product {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
 
-    @CreationTimestamp
+    // Auditoría: fechas manejadas por el sistema en los eventos del ciclo de vida.
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     public Product() {
+    }
+
+    // Se ejecuta justo antes del INSERT: registra la fecha de creación.
+    @PrePersist
+    protected void prePersist() {
+        this.createdAt = LocalDateTime.now();
+    }
+
+    // Se ejecuta justo antes del UPDATE: registra la fecha de la última edición.
+    @PreUpdate
+    protected void preUpdate() {
+        this.updatedAt = LocalDateTime.now();
     }
 
     // getters y setters de todos los campos
@@ -72,7 +81,8 @@ repositorio en memoria asigna el `id` y los timestamps.
 ## 2. DTO — `dto/ProductDto.java`
 
 Mismo record para request y response. Sin `createdAt` / `updatedAt` ni campos
-sensibles.
+sensibles. Cada anotación lleva su `message` en español (el advice lo devuelve
+por campo); usa `{max}`, `{min}`, `{value}` para no repetir los límites.
 
 ```java
 package {base}.dto;
@@ -84,15 +94,15 @@ import java.math.BigDecimal;
 public record ProductDto(
         Long id,
 
-        @NotBlank
-        @Size(max = 120)
+        @NotBlank(message = "El nombre es obligatorio")
+        @Size(max = 120, message = "El nombre no puede superar los {max} caracteres")
         String name,
 
-        @Size(max = 500)
+        @Size(max = 500, message = "La descripción no puede superar los {max} caracteres")
         String description,
 
-        @NotNull
-        @DecimalMin(value = "0.0", inclusive = false)
+        @NotNull(message = "El precio es obligatorio")
+        @DecimalMin(value = "0.0", inclusive = false, message = "El precio debe ser mayor que 0")
         BigDecimal price
 ) {
 }
@@ -395,45 +405,119 @@ package {base}.exceptions;
 public class ResourceNotFoundException extends RuntimeException {
 
     public ResourceNotFoundException(String resource, Object id) {
-        super(resource + " with id " + id + " not found");
+        super(resource + " con id " + id + " no encontrado");
+    }
+}
+```
+
+### `exceptions/DuplicateResourceException.java`
+
+Para valores únicos repetidos (email, username, sku); el service la lanza antes
+de guardar.
+
+```java
+package {base}.exceptions;
+
+public class DuplicateResourceException extends RuntimeException {
+
+    public DuplicateResourceException(String resource, String field, Object value) {
+        super(resource + " con " + field + " '" + value + "' ya existe");
     }
 }
 ```
 
 ### `exceptions/GlobalExceptionHandler.java`
 
+**Debe extender `ResponseEntityExceptionHandler`** y sobrescribir
+`handleMethodArgumentNotValid`; no uses `@ExceptionHandler(MethodArgumentNotValidException.class)`.
+Con `spring.mvc.problemdetails.enabled=true` (ver `configuration.md`) Spring Boot
+registra su propio advice (`ProblemDetailsExceptionHandler`) con mayor prioridad,
+que atiende la validación primero y responde un 400 genérico sin los errores por
+campo. Ese advice de Boot solo se registra si no existe ya un bean
+`ResponseEntityExceptionHandler`, así que al extenderlo se desactiva y el resto
+de errores de Spring MVC (JSON mal formado, método no permitido...) sigue
+respondiendo como `ProblemDetail`.
+
 ```java
 package {base}.exceptions;
 
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestControllerAdvice(annotations = RestController.class)
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    // 404: el recurso no existe.
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Recurso no encontrado");
+        return problem;
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ProblemDetail handleValidation(MethodArgumentNotValidException ex) {
+    // 409: valor único ya en uso, detectado por el service.
+    @ExceptionHandler(DuplicateResourceException.class)
+    public ProblemDetail handleDuplicate(DuplicateResourceException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Recurso duplicado");
+        return problem;
+    }
+
+    // 409: la base de datos rechazó el cambio por una restricción (p. ej. UNIQUE
+    // cuando dos peticiones simultáneas pasan la validación del service). Solo con JPA.
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrity(DataIntegrityViolationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
+                "El dato ya está en uso o viola una restricción de la base de datos");
+        problem.setTitle("Conflicto de datos");
+        return problem;
+    }
+
+    // 400: campos del DTO que no pasan Bean Validation, con su mensaje por campo.
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
+                                                                  HttpHeaders headers,
+                                                                  HttpStatusCode status,
+                                                                  WebRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors()
-                .forEach(e -> errors.put(e.getField(), e.getDefaultMessage()));
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
+                .forEach(error -> errors.putIfAbsent(error.getField(), error.getDefaultMessage()));
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "Hay campos con errores de validación");
+        problem.setTitle("Error de validación");
         problem.setProperty("errors", errors);
-        return problem;
+        return handleExceptionInternal(ex, problem, headers, status, request);
     }
 }
 ```
+
+Respuesta de validación resultante:
+
+```json
+{
+  "title": "Error de validación",
+  "status": 400,
+  "detail": "Hay campos con errores de validación",
+  "instance": "/api/products",
+  "errors": { "name": "El nombre es obligatorio", "price": "El precio debe ser mayor que 0" }
+}
+```
+
+Sin JPA, quita el handler de `DataIntegrityViolationException`: esa clase vive
+en `spring-tx`, que solo llega al classpath con `spring-boot-starter-data-jpa`.
 
 El advice se acota con `annotations = RestController.class` (y no con
 `basePackages`, que también incluiría el subpackage `controllers.web`) para que

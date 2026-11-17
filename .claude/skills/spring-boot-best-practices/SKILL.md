@@ -115,8 +115,9 @@ repositorio y no de su implementación):
 | transacciones | sin `@Transactional` (no hay `spring-tx`) | `@Transactional` en el service |
 
 - **models** — con JPA: entidades `jakarta.persistence`. Id `Long` con
-  `GenerationType.IDENTITY`; auditoría con `@CreationTimestamp` /
-  `@UpdateTimestamp` en `created_at` / `updated_at`. Constructor vacío
+  `GenerationType.IDENTITY`; auditoría en `created_at` / `updated_at`
+  asignada por el sistema con callbacks JPA `@PrePersist` / `@PreUpdate`
+  (no `@CreationTimestamp` / `@UpdateTimestamp` de Hibernate). Constructor vacío
   requerido por JPA, getters/setters.
 - **dto** — `record`, **uno solo por recurso**, usado tanto en request como en
   response (no crees `XCreateRequest`, `XResponse`, `PasswordDto`, etc.). Lleva
@@ -148,8 +149,13 @@ repositorio y no de su implementación):
   impl) y devuelve DTOs con `ResponseEntity` y el status correcto (201 +
   `Location` al crear, 204 al borrar). Sin lógica de negocio ni acceso a
   repositorios.
-- **exceptions** — `@RestControllerAdvice` que traduce excepciones a
-  `ProblemDetail` (404 not found, 400 validación).
+- **exceptions** — `@RestControllerAdvice` que **extiende
+  `ResponseEntityExceptionHandler`** y traduce excepciones a `ProblemDetail`
+  (404 not found, 409 duplicado, 400 validación con los errores por campo).
+  La validación se maneja sobrescribiendo `handleMethodArgumentNotValid`, no con
+  `@ExceptionHandler`: si no, el advice por defecto de Spring Boot la atiende
+  primero y se pierden los errores por campo. Cada anotación de Bean Validation
+  del DTO lleva su `message` en español.
 
 Usa siempre inyección por constructor con campos `final` (sin `@Autowired` en
 campos): hace explícitas las dependencias y facilita los tests.
